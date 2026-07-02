@@ -1,0 +1,12 @@
+<Solution>
+  <Folder Name="/sample-packs/" />
+  <Folder Name="/sample-packs/hello-pack/" />
+  <Folder Name="/sample-packs/hello-pack/commands/" />
+  <Folder Name="/sample-packs/hello-pack/commands/hello/">
+    <Project Path="sample-packs/hello-pack/commands/hello/HelloCommand.csproj" />
+  </Folder>
+  <Folder Name="/src/">
+    <Project Path="src/ReaperShell.Abstractions/ReaperShell.Abstractions.csproj" />
+    <Project Path="src/ReaperShell/ReaperShell.csproj" />
+  </Folder>
+</Solution>

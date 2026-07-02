@@ -1,0 +1,6 @@
+{
+  "id": "hello-pack",
+  "name": "Hello Pack",
+  "description": "Sample command pack for ReaperShell.",
+  "commandsPath": "commands"
+}
