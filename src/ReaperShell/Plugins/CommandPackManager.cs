@@ -1,4 +1,5 @@
 using System.Reflection;
+using System.Runtime.CompilerServices;
 using ReaperShell.Abstractions;
 using ReaperShell.Shell;
 
@@ -145,14 +146,6 @@ public sealed class CommandPackManager
         };
     }
 
-    private static WeakReference RequestUnload(LoadedCommandPack loadedPack)
-    {
-        var loadContext = loadedPack.LoadContext;
-        var weakReference = new WeakReference(loadContext);
-        loadContext.Unload();
-        return weakReference;
-    }
-
     public async Task<CommandPackLoadResult> LoadAsync(
         CommandRepoSettings repo,
         string configuration,
@@ -182,7 +175,6 @@ public sealed class CommandPackManager
             }
 
             var loadContext = new PluginLoadContext(assemblyPaths);
-            var commands = new List<IShellCommand>();
             var registeredNames = new List<string>();
 
             try
@@ -196,11 +188,10 @@ public sealed class CommandPackManager
                         if (!_commandRegistry.RegisterPlugin(command))
                         {
                             context.WriteErrorLine(
-                                $"Skipped command '{command.Name}' because that name is already registered.");
+                                $"Warning: skipped command '{command.Name}' because that name is already registered.");
                             continue;
                         }
 
-                        commands.Add(command);
                         registeredNames.Add(command.Name);
                     }
                 }
@@ -218,7 +209,6 @@ public sealed class CommandPackManager
                     Name = repo.Name,
                     Path = repo.LocalPath,
                     LoadContext = loadContext,
-                    Commands = commands,
                     RegisteredCommandNames = registeredNames
                 };
 
@@ -248,22 +238,21 @@ public sealed class CommandPackManager
             return Task.FromResult(new CommandPackUnloadResult(1, false, false));
         }
 
-        foreach (var commandName in loadedPack.RegisteredCommandNames)
+        var registeredCommandNames = loadedPack.RegisteredCommandNames.ToArray();
+        PluginLoadContext? loadContext = loadedPack.LoadContext;
+        loadedPack = null;
+
+        foreach (var commandName in registeredCommandNames)
         {
             _commandRegistry.Unregister(commandName);
         }
 
-        var weakReference = RequestUnload(loadedPack);
-
-        for (var attempt = 0; attempt < 3 && weakReference.IsAlive; attempt++)
-        {
-            GC.Collect();
-            GC.WaitForPendingFinalizers();
-            GC.Collect();
-        }
+        var weakReference = RequestUnload(loadContext);
+        loadContext = null;
+        var fullyUnloaded = WaitForUnload(weakReference);
 
         context.WriteLine($"Unload requested for '{repoName}'.");
-        if (weakReference.IsAlive)
+        if (!fullyUnloaded)
         {
             context.WriteLine("The plugin context still has live references, so unload is not yet guaranteed.");
         }
@@ -272,7 +261,7 @@ public sealed class CommandPackManager
             context.WriteLine("The plugin context was collected.");
         }
 
-        return Task.FromResult(new CommandPackUnloadResult(0, true, !weakReference.IsAlive));
+        return Task.FromResult(new CommandPackUnloadResult(0, true, fullyUnloaded));
     }
 
     private void RollBackRegisteredCommands(IEnumerable<string> registeredNames)
@@ -325,12 +314,42 @@ public sealed class CommandPackManager
             .FirstOrDefault();
     }
 
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static WeakReference RequestUnload(PluginLoadContext? loadContext)
+    {
+        var weakReference = new WeakReference(loadContext);
+        loadContext?.Unload();
+        return weakReference;
+    }
+
+    private static bool WaitForUnload(WeakReference weakReference)
+    {
+        // Collectible unload is only requested here. If plugin code still has
+        // static state, background work, or other rooted references, collection
+        // can legitimately stay pending after these GC passes.
+        for (var attempt = 0; attempt < 3 && weakReference.IsAlive; attempt++)
+        {
+            GC.Collect();
+            GC.WaitForPendingFinalizers();
+            GC.Collect();
+        }
+
+        return !weakReference.IsAlive;
+    }
+
     private static IEnumerable<IShellCommand> InstantiateCommands(Assembly assembly, ShellContext context)
     {
-        foreach (var type in SafeGetTypes(assembly))
+        foreach (var type in SafeGetTypes(assembly, context))
         {
             if (!type.IsClass || type.IsAbstract || !type.IsPublic)
             {
+                continue;
+            }
+
+            if (ImplementsMismatchedShellCommandContract(type))
+            {
+                context.WriteErrorLine(
+                    $"Warning: skipped '{type.FullName}' because it implements a different ReaperShell.Abstractions contract instance.");
                 continue;
             }
 
@@ -345,14 +364,30 @@ public sealed class CommandPackManager
                 continue;
             }
 
-            if (Activator.CreateInstance(type) is IShellCommand command)
+            IShellCommand? command;
+            try
             {
-                yield return command;
+                command = Activator.CreateInstance(type) as IShellCommand;
             }
+            catch (Exception ex)
+            {
+                context.WriteErrorLine(
+                    $"Skipped '{type.FullName}' because its constructor failed: {GetExceptionMessage(ex)}");
+                continue;
+            }
+
+            if (command is null)
+            {
+                context.WriteErrorLine(
+                    $"Skipped '{type.FullName}' because it could not be instantiated as IShellCommand.");
+                continue;
+            }
+
+            yield return command;
         }
     }
 
-    private static IEnumerable<Type> SafeGetTypes(Assembly assembly)
+    private static IEnumerable<Type> SafeGetTypes(Assembly assembly, ShellContext context)
     {
         try
         {
@@ -360,8 +395,32 @@ public sealed class CommandPackManager
         }
         catch (ReflectionTypeLoadException ex)
         {
+            foreach (var loaderException in ex.LoaderExceptions.Where(loaderException => loaderException is not null))
+            {
+                context.WriteErrorLine(
+                    $"Warning: failed to inspect some types in '{assembly.FullName}': {loaderException!.Message}");
+            }
+
             return ex.Types.Where(type => type is not null).Cast<Type>();
         }
+    }
+
+    private static bool ImplementsMismatchedShellCommandContract(Type type)
+    {
+        return type.GetInterfaces().Any(
+            interfaceType =>
+                string.Equals(interfaceType.FullName, typeof(IShellCommand).FullName, StringComparison.Ordinal) &&
+                interfaceType != typeof(IShellCommand));
+    }
+
+    private static string GetExceptionMessage(Exception exception)
+    {
+        if (exception is TargetInvocationException { InnerException: { } innerException })
+        {
+            return innerException.Message;
+        }
+
+        return exception.Message;
     }
 }
 
