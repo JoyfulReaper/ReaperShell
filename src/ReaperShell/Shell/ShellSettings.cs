@@ -18,16 +18,16 @@ public sealed class ShellSettings
     public string DefaultConfiguration { get; set; } = "Debug";
 
     public static async Task<ShellSettings> LoadOrCreateAsync(
-        string rootPath,
+        string stateDirectory,
         CancellationToken cancellationToken)
     {
-        var settingsPath = GetSettingsPath(rootPath);
+        var settingsPath = GetSettingsPath(stateDirectory);
         Directory.CreateDirectory(Path.GetDirectoryName(settingsPath)!);
 
         if (!File.Exists(settingsPath))
         {
             var settings = new ShellSettings();
-            await settings.SaveAsync(rootPath, cancellationToken);
+            await settings.SaveAsync(stateDirectory, cancellationToken);
             return settings;
         }
 
@@ -40,18 +40,18 @@ public sealed class ShellSettings
         return settingsFromDisk ?? new ShellSettings();
     }
 
-    public async Task SaveAsync(string rootPath, CancellationToken cancellationToken)
+    public async Task SaveAsync(string stateDirectory, CancellationToken cancellationToken)
     {
-        var settingsPath = GetSettingsPath(rootPath);
+        var settingsPath = GetSettingsPath(stateDirectory);
         Directory.CreateDirectory(Path.GetDirectoryName(settingsPath)!);
 
         await using var stream = File.Create(settingsPath);
         await JsonSerializer.SerializeAsync(stream, this, JsonOptions, cancellationToken);
     }
 
-    public static string GetSettingsPath(string rootPath)
+    public static string GetSettingsPath(string stateDirectory)
     {
-        return Path.Combine(rootPath, ".rsh", "settings.json");
+        return Path.Combine(stateDirectory, "settings.json");
     }
 }
 

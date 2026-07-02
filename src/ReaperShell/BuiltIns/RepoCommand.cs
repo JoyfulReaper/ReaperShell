@@ -9,19 +9,22 @@ public sealed class RepoCommand : IShellCommand
 {
     private readonly CommandPackManager _commandPackManager;
     private readonly ProcessRunner _processRunner;
-    private readonly string _rootPath;
+    private readonly string _stateDirectory;
     private readonly ShellSettings _settings;
+    private readonly string _workspaceRoot;
 
     public RepoCommand(
         ShellSettings settings,
         ProcessRunner processRunner,
         CommandPackManager commandPackManager,
-        string rootPath)
+        string workspaceRoot,
+        string stateDirectory)
     {
         _settings = settings;
         _processRunner = processRunner;
         _commandPackManager = commandPackManager;
-        _rootPath = rootPath;
+        _workspaceRoot = workspaceRoot;
+        _stateDirectory = stateDirectory;
     }
 
     public string Name => "repo";
@@ -133,7 +136,7 @@ public sealed class RepoCommand : IShellCommand
         }
 
         _settings.Repos[name] = repo;
-        await _settings.SaveAsync(_rootPath, cancellationToken);
+        await _settings.SaveAsync(_stateDirectory, cancellationToken);
         context.WriteLine($"Registered repo '{name}' at {repo.LocalPath}.");
         context.WriteLine("Newly added repos are untrusted until you run 'repo trust <name>'.");
         return 0;
@@ -169,7 +172,7 @@ public sealed class RepoCommand : IShellCommand
         }
 
         repo.Trusted = true;
-        await _settings.SaveAsync(_rootPath, cancellationToken);
+        await _settings.SaveAsync(_stateDirectory, cancellationToken);
         context.WriteLine("This repo can execute code on your machine when loaded.");
         context.WriteLine($"Marked '{repo.Name}' as trusted.");
         return 0;
@@ -192,7 +195,7 @@ public sealed class RepoCommand : IShellCommand
         }
 
         repo.Trusted = false;
-        await _settings.SaveAsync(_rootPath, cancellationToken);
+        await _settings.SaveAsync(_stateDirectory, cancellationToken);
         context.WriteLine($"Marked '{repo.Name}' as untrusted.");
         return 0;
     }
@@ -433,7 +436,7 @@ public sealed class RepoCommand : IShellCommand
 
         await File.WriteAllTextAsync(
             Path.Combine(repoRoot, "commands", "hello", "HelloCommand.csproj"),
-            GetGeneratedProjectFileContents(),
+            GetGeneratedProjectFileContents(repoRoot),
             cancellationToken);
 
         await File.WriteAllTextAsync(
@@ -451,7 +454,7 @@ public sealed class RepoCommand : IShellCommand
         };
 
         _settings.Repos[name] = repo;
-        await _settings.SaveAsync(_rootPath, cancellationToken);
+        await _settings.SaveAsync(_stateDirectory, cancellationToken);
 
         context.WriteLine($"Created local command pack at {repoRoot}");
         context.WriteLine("repo build " + name);
@@ -468,7 +471,7 @@ public sealed class RepoCommand : IShellCommand
 
     private string GetManagedReposRoot()
     {
-        return Path.Combine(_rootPath, ".rsh", "repos");
+        return Path.Combine(_stateDirectory, "repos");
     }
 
     private static bool LooksLikeGitWorkingTree(string path)
@@ -511,9 +514,17 @@ public sealed class RepoCommand : IShellCommand
         return true;
     }
 
-    private static string GetGeneratedProjectFileContents()
+    private string GetGeneratedProjectFileContents(string repoRoot)
     {
-        return """
+        var projectDirectory = Path.Combine(repoRoot, "commands", "hello");
+        var abstractionsProjectPath = Path.Combine(
+            _workspaceRoot,
+            "src",
+            "ReaperShell.Abstractions",
+            "ReaperShell.Abstractions.csproj");
+        var relativeProjectReference = Path.GetRelativePath(projectDirectory, abstractionsProjectPath);
+
+        return $$"""
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
@@ -523,7 +534,7 @@ public sealed class RepoCommand : IShellCommand
   </PropertyGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\..\..\..\src\ReaperShell.Abstractions\ReaperShell.Abstractions.csproj" />
+    <ProjectReference Include="{{relativeProjectReference}}" />
   </ItemGroup>
 
 </Project>

@@ -15,10 +15,9 @@ public sealed class ShellHost
         _lifetime = lifetime;
     }
 
-    public async Task RunAsync(ShellContext context, CancellationToken cancellationToken)
+    public async Task<int> RunInteractiveAsync(ShellContext context, CancellationToken cancellationToken)
     {
-        context.WriteLine("REAPER SHELL v0.1");
-        context.WriteLine("Live command environment online.");
+        WriteBanner(context);
 
         while (!_lifetime.ExitRequested && !cancellationToken.IsCancellationRequested)
         {
@@ -29,30 +28,110 @@ public sealed class ShellHost
                 break;
             }
 
-            var tokens = _commandParser.Parse(input);
-            if (tokens.Count == 0)
+            await ExecuteCommandAsync(context, input, echoCommand: false, cancellationToken);
+        }
+
+        return 0;
+    }
+
+    public async Task<int> RunScriptAsync(
+        ShellContext context,
+        string scriptPath,
+        bool continueOnError,
+        CancellationToken cancellationToken)
+    {
+        if (!File.Exists(scriptPath))
+        {
+            context.WriteErrorLine($"Script file does not exist: {scriptPath}");
+            return 1;
+        }
+
+        WriteBanner(context);
+
+        var exitCode = 0;
+        foreach (var line in await File.ReadAllLinesAsync(scriptPath, cancellationToken))
+        {
+            var commandText = line.Trim();
+            if (string.IsNullOrWhiteSpace(commandText) || commandText.StartsWith('#'))
             {
                 continue;
             }
 
-            if (!_commandRegistry.TryGet(tokens[0], out var command))
+            var commandExitCode = await ExecuteCommandAsync(
+                context,
+                commandText,
+                echoCommand: true,
+                cancellationToken);
+
+            if (commandExitCode != 0)
             {
-                context.WriteErrorLine($"Unknown command: {tokens[0]}");
-                continue;
+                exitCode = commandExitCode;
+                if (!continueOnError)
+                {
+                    return exitCode;
+                }
             }
 
-            try
+            if (_lifetime.ExitRequested || cancellationToken.IsCancellationRequested)
             {
-                await command.ExecuteAsync(context, tokens.Skip(1).ToArray(), cancellationToken);
+                break;
             }
-            catch (OperationCanceledException)
-            {
-                context.WriteErrorLine("Command canceled.");
-            }
-            catch (Exception ex)
-            {
-                context.WriteErrorLine($"Command failed: {ex.Message}");
-            }
+        }
+
+        return exitCode;
+    }
+
+    public async Task<int> RunCommandAsync(
+        ShellContext context,
+        string commandText,
+        CancellationToken cancellationToken)
+    {
+        WriteBanner(context);
+        return await ExecuteCommandAsync(context, commandText, echoCommand: false, cancellationToken);
+    }
+
+    private static void WriteBanner(ShellContext context)
+    {
+        context.WriteLine("REAPER SHELL v0.1");
+        context.WriteLine("Live command environment online.");
+    }
+
+    private async Task<int> ExecuteCommandAsync(
+        ShellContext context,
+        string input,
+        bool echoCommand,
+        CancellationToken cancellationToken)
+    {
+        if (echoCommand)
+        {
+            context.WriteLine($"rsh> {input}");
+        }
+
+        var tokens = _commandParser.Parse(input);
+        if (tokens.Count == 0)
+        {
+            return 0;
+        }
+
+        if (!_commandRegistry.TryGet(tokens[0], out var command))
+        {
+            context.WriteErrorLine($"Unknown command: {tokens[0]}");
+            return 1;
+        }
+
+        try
+        {
+            return await command.ExecuteAsync(context, tokens.Skip(1).ToArray(), cancellationToken);
+        }
+        catch (OperationCanceledException)
+        {
+            context.WriteErrorLine("Command canceled.");
+            return 1;
+        }
+        catch (Exception ex)
+        {
+            context.WriteErrorLine($"Command failed: {ex.Message}");
+            return 1;
         }
     }
 }
