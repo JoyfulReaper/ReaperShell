@@ -501,6 +501,13 @@ repo trust tools
 repo build tools
 repo load tools
 ```
+- scripts/smoke-sample.rsh
+- scripts/smoke-generated.rsh
+- scripts/smoke-repo-lifecycle.rsh
+- scripts/smoke-customization.rsh
+- scripts/smoke-hooks.rsh
+- scripts/smoke-doctor.rsh
+- scripts/smoke-command-forge.rsh
 
 Git-backed repos are cloned under:
 
