@@ -5,6 +5,33 @@ namespace ReaperShell.Shell;
 
 public sealed class ProcessRunner
 {
+    public void StartDetached(
+        string executable,
+        IReadOnlyList<string> arguments,
+        string workingDirectory)
+    {
+        var startInfo = new ProcessStartInfo
+        {
+            FileName = executable,
+            WorkingDirectory = workingDirectory,
+            UseShellExecute = false
+        };
+
+        foreach (var argument in arguments)
+        {
+            startInfo.ArgumentList.Add(argument);
+        }
+
+        var process = new Process { StartInfo = startInfo };
+        if (!process.Start())
+        {
+            process.Dispose();
+            throw new InvalidOperationException($"Failed to start process '{executable}'.");
+        }
+
+        process.Dispose();
+    }
+
     public async Task<ProcessRunResult> RunAsync(
         string executable,
         IReadOnlyList<string> arguments,

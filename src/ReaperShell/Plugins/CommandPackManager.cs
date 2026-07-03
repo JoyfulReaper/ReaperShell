@@ -185,7 +185,7 @@ public sealed class CommandPackManager
 
                     foreach (var command in InstantiateCommands(assembly, context))
                     {
-                        if (!_commandRegistry.RegisterPlugin(command))
+                        if (!_commandRegistry.RegisterPlugin(command, repo.Name, repo.LocalPath))
                         {
                             context.WriteErrorLine(
                                 $"Warning: skipped command '{command.Name}' because that name is already registered.");

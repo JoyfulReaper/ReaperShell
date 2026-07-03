@@ -33,6 +33,8 @@ internal static class Program
         var processRunner = new ProcessRunner();
         var commandPackManager = new CommandPackManager(registry, processRunner);
         var lifetime = new ShellLifetime();
+        var host = new ShellHost(parser, registry, lifetime, settings);
+        var editorLauncher = new EditorLauncher(settings, processRunner);
 
         RegisterBuiltIns(
             registry,
@@ -40,6 +42,8 @@ internal static class Program
             processRunner,
             commandPackManager,
             lifetime,
+            host,
+            editorLauncher,
             workspaceRoot,
             stateDirectory);
 
@@ -50,11 +54,23 @@ internal static class Program
             services: null,
             cancellationToken: CancellationToken.None);
 
-        var host = new ShellHost(parser, registry, lifetime);
+        var defaultProfilePath = Path.Combine(stateDirectory, "profile.rsh");
+        var shouldRunProfile =
+            !options.NoProfile &&
+            (options.ProfilePath is not null || options.ScriptPath is null && options.CommandText is null);
+        var profilePath = options.ProfilePath is null
+            ? defaultProfilePath
+            : Path.GetFullPath(options.ProfilePath, workspaceRoot);
 
         if (options.ScriptPath is not null)
         {
             var scriptPath = Path.GetFullPath(options.ScriptPath, workspaceRoot);
+            if (shouldRunProfile &&
+                !await TryRunProfileAsync(host, context, profilePath, options.ProfilePath is not null))
+            {
+                return 1;
+            }
+
             return await host.RunScriptAsync(
                 context,
                 scriptPath,
@@ -64,10 +80,20 @@ internal static class Program
 
         if (options.CommandText is not null)
         {
+            if (shouldRunProfile &&
+                !await TryRunProfileAsync(host, context, profilePath, options.ProfilePath is not null))
+            {
+                return 1;
+            }
+
             return await host.RunCommandAsync(context, options.CommandText, CancellationToken.None);
         }
 
-        return await host.RunInteractiveAsync(context, CancellationToken.None);
+        await EnsureDefaultProfileExistsAsync(defaultProfilePath);
+        return await host.RunInteractiveAsync(
+            context,
+            shouldRunProfile ? profilePath : null,
+            CancellationToken.None);
     }
 
     private static void RegisterBuiltIns(
@@ -76,6 +102,8 @@ internal static class Program
         ProcessRunner processRunner,
         CommandPackManager commandPackManager,
         ShellLifetime lifetime,
+        ShellHost host,
+        EditorLauncher editorLauncher,
         string workspaceRoot,
         string stateDirectory)
     {
@@ -87,6 +115,16 @@ internal static class Program
         registry.RegisterBuiltIn(new LsCommand());
         registry.RegisterBuiltIn(new CdCommand());
         registry.RegisterBuiltIn(new CatCommand());
+        registry.RegisterBuiltIn(new AliasCommand(settings, registry, stateDirectory));
+        registry.RegisterBuiltIn(new RitualCommand(host, stateDirectory));
+        registry.RegisterBuiltIn(new WhichCommand(settings, registry));
+        registry.RegisterBuiltIn(new DescribeCommand(settings, registry));
+        registry.RegisterBuiltIn(new EditCommand(editorLauncher));
+        registry.RegisterBuiltIn(new SourceCommand(settings, registry, editorLauncher, workspaceRoot));
+        registry.RegisterBuiltIn(new BannerCommand());
+        registry.RegisterBuiltIn(new StatusCommand(settings, registry, commandPackManager, stateDirectory));
+        registry.RegisterBuiltIn(new FortuneCommand());
+        registry.RegisterBuiltIn(new PrayCommand());
         registry.RegisterBuiltIn(
             new RepoCommand(
                 settings,
@@ -108,6 +146,45 @@ internal static class Program
             Console.Error.WriteLine($"Failed to load settings: {ex.Message}");
             return new ShellSettings();
         }
+    }
+
+    private static async Task EnsureDefaultProfileExistsAsync(string profilePath)
+    {
+        var profileDirectory = Path.GetDirectoryName(profilePath);
+        if (!string.IsNullOrWhiteSpace(profileDirectory))
+        {
+            Directory.CreateDirectory(profileDirectory);
+        }
+
+        if (File.Exists(profilePath))
+        {
+            return;
+        }
+
+        await File.WriteAllTextAsync(
+            profilePath,
+            """
+# ReaperShell startup profile
+# Commands here run when the interactive shell starts.
+# Example:
+# repo list
+# plugins
+""");
+    }
+
+    private static async Task<bool> TryRunProfileAsync(
+        ShellHost host,
+        ShellContext context,
+        string profilePath,
+        bool explicitProfile)
+    {
+        if (!explicitProfile && !File.Exists(profilePath))
+        {
+            return true;
+        }
+
+        var exitCode = await host.RunProfileAsync(context, profilePath, CancellationToken.None);
+        return exitCode == 0 || !explicitProfile;
     }
 
     private static bool TryParseOptions(
@@ -151,6 +228,19 @@ internal static class Program
 
                 case "--continue-on-error":
                     options.ContinueOnError = true;
+                    break;
+
+                case "--no-profile":
+                    options.NoProfile = true;
+                    break;
+
+                case "--profile":
+                    if (!TryReadOptionValue(args, ref index, "--profile", out var profilePath, out errorMessage))
+                    {
+                        return false;
+                    }
+
+                    options.ProfilePath = profilePath;
                     break;
 
                 case "--help":
@@ -198,13 +288,15 @@ internal static class Program
         return """
 Usage:
   ReaperShell
-  ReaperShell --command "<command>"
-  ReaperShell --script <path> [--continue-on-error] [--state-dir <path>]
+  ReaperShell --command "<command>" [--profile <path>] [--no-profile]
+  ReaperShell --script <path> [--continue-on-error] [--state-dir <path>] [--profile <path>] [--no-profile]
 
 Options:
   --command <command>         Execute one command and exit.
   --script <path>             Execute commands from a script file and exit.
   --continue-on-error         Continue running a script after a command fails.
+  --no-profile                Disable profile execution.
+  --profile <path>            Execute the provided profile instead of <state-dir>/profile.rsh.
   --state-dir <path>          Store settings.json and managed repos under this directory.
   --help, -h                  Show usage information.
 """;
@@ -216,6 +308,10 @@ internal sealed class ProgramOptions
     public string? CommandText { get; set; }
 
     public bool ContinueOnError { get; set; }
+
+    public bool NoProfile { get; set; }
+
+    public string? ProfilePath { get; set; }
 
     public string? ScriptPath { get; set; }
 

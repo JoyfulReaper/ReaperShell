@@ -50,6 +50,23 @@ Use `--state-dir` to isolate `settings.json` and managed repos under a different
 dotnet run --project src/ReaperShell -- --state-dir ./.rsh-smoke --script scripts/smoke-sample.rsh
 ```
 
+Interactive mode also supports startup profiles:
+
+- `--no-profile` skips profile execution.
+- `--profile <path>` runs a specific profile file instead of `<state-dir>/profile.rsh`.
+- On first interactive startup, ReaperShell creates a starter `<state-dir>/profile.rsh` if it does not exist yet.
+
+## Making The Shell Yours
+
+The first customization layer in ReaperShell is intentionally small and readable:
+
+- `profile.rsh` lets you run startup commands before the first prompt.
+- Aliases let you rename frequent commands or create short habits.
+- Rituals let you save named reusable `.rsh` scripts under your state directory.
+- Command packs remain the deeper customization layer for live-loaded code.
+
+Together, those features make the shell feel personal without turning it into a scripting language.
+
 ## Demo
 
 ```text
@@ -78,6 +95,34 @@ ReaperShell supports a focused set of repo lifecycle and Git-backed workflows:
 
 Auto-sync only applies to trusted repos because loaded command packs execute code on your machine.
 
+## Customization Commands
+
+- `alias` lists aliases.
+- `alias set <name> <replacement>` creates or updates an alias.
+- `alias show <name>` prints one alias.
+- `alias remove <name>` deletes an alias.
+- `alias clear` removes all aliases.
+- `ritual path` prints the rituals directory under the current state dir.
+- `ritual list` lists saved rituals.
+- `ritual new <name>` creates a starter ritual file.
+- `ritual run <name>` runs a ritual script.
+- `ritual run <name> --continue-on-error` keeps running that ritual after a failure.
+- `which <command>` shows whether a command comes from a built-in, alias, or plugin pack.
+- `describe <command>` prints command name, description, and origin details.
+- `edit <path>` opens a file or directory with the configured editor.
+- `source <command>` shows or opens the source location for a command.
+- `banner` prints the shell banner again.
+- `status` prints the current shell/runtime status.
+- `fortune` prints a small shell fortune.
+- `pray` prints a pseudo-ritual response.
+
+Editor resolution uses:
+
+1. `ShellSettings.EditorCommand`
+2. `RSH_EDITOR`
+3. `EDITOR`
+4. `code`, if available
+
 ## Smoke Tests
 
 The repository includes smoke-test scripts for the sample pack and generated packs:
@@ -85,8 +130,9 @@ The repository includes smoke-test scripts for the sample pack and generated pac
 - [scripts/smoke-sample.rsh](/C:/GitHub/ReaperShell/scripts/smoke-sample.rsh)
 - [scripts/smoke-generated.rsh](/C:/GitHub/ReaperShell/scripts/smoke-generated.rsh)
 - [scripts/smoke-repo-lifecycle.rsh](/C:/GitHub/ReaperShell/scripts/smoke-repo-lifecycle.rsh)
+- [scripts/smoke-customization.rsh](/C:/GitHub/ReaperShell/scripts/smoke-customization.rsh)
 
-Run all three through the convenience PowerShell harness:
+Run all four through the convenience PowerShell harness:
 
 ```powershell
 ./scripts/run-smoke.ps1

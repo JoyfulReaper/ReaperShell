@@ -65,6 +65,11 @@ try {
     Invoke-Step 'Running repo lifecycle smoke script' {
         dotnet $shellDll --state-dir $stateDir --script (Join-Path $repoRoot 'scripts\smoke-repo-lifecycle.rsh')
     }
+
+    Reset-SmokeState
+    Invoke-Step 'Running customization smoke script' {
+        dotnet $shellDll --state-dir $stateDir --script (Join-Path $repoRoot 'scripts\smoke-customization.rsh')
+    }
 }
 finally {
     Pop-Location

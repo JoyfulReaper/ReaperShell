@@ -15,7 +15,12 @@ public sealed class ShellSettings
     public Dictionary<string, CommandRepoSettings> Repos { get; set; } =
         new(StringComparer.OrdinalIgnoreCase);
 
+    public Dictionary<string, string> Aliases { get; set; } =
+        new(StringComparer.OrdinalIgnoreCase);
+
     public string DefaultConfiguration { get; set; } = "Debug";
+
+    public string? EditorCommand { get; set; }
 
     public static async Task<ShellSettings> LoadOrCreateAsync(
         string stateDirectory,
