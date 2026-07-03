@@ -4,6 +4,8 @@ namespace ReaperShell.Shell;
 
 public sealed class ShellWatchService
 {
+    private static readonly TimeSpan ReloadDebounceDelay = TimeSpan.FromMilliseconds(750);
+
     private readonly ShellHost _shellHost;
     private readonly Dictionary<string, WatchedRepo> _watchedRepos =
         new(StringComparer.OrdinalIgnoreCase);
@@ -103,8 +105,11 @@ public sealed class ShellWatchService
 
         try
         {
-            watchedRepo.ScheduleReload(async () =>
+            watchedRepo.ScheduleReload(async reloadCancellationToken =>
             {
+                // FileSystemWatcher often emits several events per edit/save. We debounce
+                // bursts into one queued `repo reload` and cancel pending work if the
+                // watcher is stopped before the reload starts.
                 watchedRepo.Context.WriteLine($"File change detected in {watchedRepo.Name}.");
                 watchedRepo.Context.WriteLine("Reloading command pack...");
 
@@ -114,7 +119,10 @@ public sealed class ShellWatchService
                         watchedRepo.Context,
                         $"repo reload {watchedRepo.Name}",
                         echoCommand: false,
-                        CancellationToken.None);
+                        reloadCancellationToken);
+                }
+                catch (OperationCanceledException)
+                {
                 }
                 catch (Exception ex)
                 {
@@ -159,9 +167,11 @@ public sealed class ShellWatchService
     private sealed class WatchedRepo : IDisposable
     {
         private readonly object _gate = new();
+        private readonly CancellationTokenSource _lifetimeCancellation = new();
         private readonly SemaphoreSlim _reloadLock = new(1, 1);
         private readonly FileSystemWatcher _watcher;
-        private Timer? _timer;
+        private CancellationTokenSource? _debounceCancellation;
+        private bool _disposed;
 
         public WatchedRepo(string name, string path, FileSystemWatcher watcher, ShellContext context)
         {
@@ -177,46 +187,82 @@ public sealed class ShellWatchService
 
         public string Path { get; }
 
-        public void ScheduleReload(Func<Task> reloadAction)
+        public void ScheduleReload(Func<CancellationToken, Task> reloadAction)
         {
+            CancellationTokenSource debounceCancellation;
             lock (_gate)
             {
-                _timer ??= new Timer(
-                    async _ => await RunReloadAsync(reloadAction),
-                    null,
-                    Timeout.InfiniteTimeSpan,
-                    Timeout.InfiniteTimeSpan);
+                if (_disposed)
+                {
+                    return;
+                }
 
-                _timer.Change(TimeSpan.FromMilliseconds(750), Timeout.InfiniteTimeSpan);
+                _debounceCancellation?.Cancel();
+                _debounceCancellation = CancellationTokenSource.CreateLinkedTokenSource(_lifetimeCancellation.Token);
+                debounceCancellation = _debounceCancellation;
             }
+
+            _ = DebounceAndReloadAsync(debounceCancellation, reloadAction);
         }
 
         public void Dispose()
         {
+            CancellationTokenSource? debounceCancellation;
             lock (_gate)
             {
-                _timer?.Dispose();
-                _timer = null;
+                if (_disposed)
+                {
+                    return;
+                }
+
+                _disposed = true;
+                debounceCancellation = _debounceCancellation;
+                _debounceCancellation = null;
             }
 
+            debounceCancellation?.Cancel();
+            _lifetimeCancellation.Cancel();
             _watcher.Dispose();
-            _reloadLock.Dispose();
         }
 
-        private async Task RunReloadAsync(Func<Task> reloadAction)
+        private async Task DebounceAndReloadAsync(
+            CancellationTokenSource debounceCancellation,
+            Func<CancellationToken, Task> reloadAction)
         {
-            if (!await _reloadLock.WaitAsync(0))
-            {
-                return;
-            }
-
             try
             {
-                await reloadAction();
+                await Task.Delay(ReloadDebounceDelay, debounceCancellation.Token);
+
+                await _reloadLock.WaitAsync(debounceCancellation.Token);
+                try
+                {
+                    lock (_gate)
+                    {
+                        if (_disposed || !ReferenceEquals(_debounceCancellation, debounceCancellation))
+                        {
+                            return;
+                        }
+
+                        _debounceCancellation = null;
+                    }
+
+                    await reloadAction(debounceCancellation.Token);
+                }
+                finally
+                {
+                    _reloadLock.Release();
+                }
+            }
+            catch (OperationCanceledException)
+            {
+            }
+            catch (Exception ex)
+            {
+                Context.WriteErrorLine($"Watcher error for '{Name}': {ex.Message}");
             }
             finally
             {
-                _reloadLock.Release();
+                debounceCancellation.Dispose();
             }
         }
     }

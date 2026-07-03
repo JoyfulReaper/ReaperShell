@@ -2,6 +2,14 @@
 
 ReaperShell is a live-extensible programmer shell built as a .NET console app. The MVP focuses on loading command packs from local folders or Git repositories, building them with the local `dotnet` executable, and injecting their commands into the running shell without restarting.
 
+## Security Model
+
+ReaperShell is not a sandbox.
+
+Trusted command packs are in-process plugins that execute arbitrary code with your user account. They can read and write files you can access, spawn processes, and keep state alive after load.
+
+Only trust repos you control or have reviewed.
+
 ## MVP Status
 
 This repository contains the initial MVP:
@@ -56,6 +64,8 @@ Interactive mode also supports startup profiles:
 - `--profile <path>` runs a specific profile file instead of `<state-dir>/profile.rsh`.
 - On first interactive startup, ReaperShell creates a starter `<state-dir>/profile.rsh` if it does not exist yet.
 
+`.rsh/settings.json` is local runtime state, not the source of truth for reusable commands. Your command packs and Git repos remain the real source of reusable behavior, and `.rsh` generally should not be committed unless you intentionally want to preserve local shell state.
+
 ## Making The Shell Yours
 
 The first customization layer in ReaperShell is intentionally small and readable:
@@ -98,7 +108,7 @@ ReaperShell supports a focused set of repo lifecycle and Git-backed workflows:
 - `repo unwatch <name>` stops watching one repo.
 - `repo watch-list` shows the repos currently being watched.
 
-Auto-sync only applies to trusted repos because loaded command packs execute code on your machine.
+Auto-sync only applies to trusted repos because loaded command packs execute arbitrary code on your machine and are not sandboxed.
 Watch mode also executes code after file changes for trusted repos. Only watch repos you control.
 
 ## Customization Commands
@@ -161,8 +171,9 @@ The repository includes smoke-test scripts for the sample pack and generated pac
 - [scripts/smoke-hooks.rsh](/C:/GitHub/ReaperShell/scripts/smoke-hooks.rsh)
 - [scripts/smoke-doctor.rsh](/C:/GitHub/ReaperShell/scripts/smoke-doctor.rsh)
 - [scripts/smoke-command-forge.rsh](/C:/GitHub/ReaperShell/scripts/smoke-command-forge.rsh)
+- [scripts/run-validation-smoke.ps1](/C:/GitHub/ReaperShell/scripts/run-validation-smoke.ps1)
 
-Run all seven through the convenience PowerShell harness:
+Run the positive smoke scripts plus the validation/security checks through the convenience PowerShell harness:
 
 ```powershell
 ./scripts/run-smoke.ps1
@@ -172,4 +183,4 @@ That harness also runs the negative `scripts/run-security-smoke.ps1` containment
 
 ## Security Warning
 
-Loading command packs executes arbitrary code on your machine. Only trust repos you control or have reviewed.
+ReaperShell is not a sandbox. Loading trusted command packs executes arbitrary code on your machine, so only trust repos you control or have reviewed.

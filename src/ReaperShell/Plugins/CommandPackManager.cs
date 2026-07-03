@@ -253,6 +253,8 @@ public sealed class CommandPackManager
             _commandRegistry.Unregister(commandName);
         }
 
+        context.WriteLine($"Unregistered {registeredCommandNames.Length} plugin command(s) from '{repoName}'.");
+
         var weakReference = RequestUnload(loadContext);
         loadContext = null;
         var fullyUnloaded = WaitForUnload(weakReference);
@@ -261,6 +263,7 @@ public sealed class CommandPackManager
         if (!fullyUnloaded)
         {
             context.WriteLine("The plugin context still has live references, so unload is not yet guaranteed.");
+            context.WriteLine("Static plugin state, background work, or in-flight commands may still be holding the load context.");
         }
         else
         {
@@ -378,6 +381,9 @@ public sealed class CommandPackManager
             GC.Collect();
             await Task.Delay(250, cancellationToken);
         }
+
+        context.WriteLine(
+            $"The previous plugin assembly is still locked after waiting: {assemblyPath}. A live plugin context may still be pending collection.");
     }
 
     private static bool CanOpenExclusively(string assemblyPath)

@@ -1,9 +1,11 @@
+using ReaperShell.Shell;
+
 namespace ReaperShell.Plugins;
 
 public static class CommandPackPathResolver
 {
     public static StringComparison PathComparison =>
-        OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+        PathComparisonHelper.FileSystemComparison;
 
     public static string EnsurePathWithinRoot(
         string rootPath,
@@ -41,7 +43,7 @@ public static class CommandPackPathResolver
         bool allowExactMatch = true)
     {
         var normalizedRootPath = AppendDirectorySeparator(Path.GetFullPath(rootPath));
-        var normalizedCandidatePath = Path.GetFullPath(candidatePath);
+        var normalizedCandidatePath = PathComparisonHelper.NormalizeFullPath(candidatePath);
         var rootWithoutSeparator = normalizedRootPath.TrimEnd(Path.DirectorySeparatorChar);
 
         if (allowExactMatch &&

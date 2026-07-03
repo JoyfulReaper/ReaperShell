@@ -271,7 +271,8 @@ public sealed class RepoCommand : IShellCommand
 
         repo.Trusted = true;
         await SaveSettingsAsync(cancellationToken);
-        context.WriteLine("This repo can execute code on your machine when loaded.");
+        context.WriteLine("Trusted command packs execute arbitrary code on your machine and are not sandboxed.");
+        context.WriteLine("Only trust repos you control or have reviewed.");
         context.WriteLine($"Marked '{repo.Name}' as trusted.");
         return 0;
     }
@@ -431,28 +432,7 @@ public sealed class RepoCommand : IShellCommand
             return 1;
         }
 
-        Directory.CreateDirectory(repoRoot);
-        Directory.CreateDirectory(Path.Combine(repoRoot, "commands", "hello"));
-
-        var manifest = new CommandPackManifest
-        {
-            Id = name,
-            Name = $"{name} Pack",
-            Description = $"Generated command pack '{name}'.",
-            CommandsPath = "commands"
-        };
-
-        await manifest.SaveAsync(Path.Combine(repoRoot, "shellpack.json"), cancellationToken);
-
-        await File.WriteAllTextAsync(
-            Path.Combine(repoRoot, "commands", "hello", "HelloCommand.csproj"),
-            GetGeneratedProjectFileContents(repoRoot),
-            cancellationToken);
-
-        await File.WriteAllTextAsync(
-            Path.Combine(repoRoot, "commands", "hello", "HelloCommand.cs"),
-            GetGeneratedCommandContents(),
-            cancellationToken);
+        await RepoScaffolder.CreateGeneratedPackAsync(name, repoRoot, _workspaceRoot, cancellationToken);
 
         var repo = new CommandRepoSettings
         {
@@ -1218,14 +1198,12 @@ public sealed class RepoCommand : IShellCommand
 
     private static StringComparer GetPathComparer()
     {
-        return CommandPackPathResolver.PathComparison == StringComparison.OrdinalIgnoreCase
-            ? StringComparer.OrdinalIgnoreCase
-            : StringComparer.Ordinal;
+        return PathComparisonHelper.FileSystemComparer;
     }
 
     private static string NormalizeRepoPath(string path)
     {
-        return Path.GetFullPath(path);
+        return PathComparisonHelper.NormalizeFullPath(path);
     }
 
     private static bool TryValidateRepoName(string name, ShellContext context)
@@ -1269,58 +1247,6 @@ public sealed class RepoCommand : IShellCommand
 
         repo = foundRepo;
         return true;
-    }
-
-    private string GetGeneratedProjectFileContents(string repoRoot)
-    {
-        var projectDirectory = Path.Combine(repoRoot, "commands", "hello");
-        var abstractionsProjectPath = Path.Combine(
-            _workspaceRoot,
-            "src",
-            "ReaperShell.Abstractions",
-            "ReaperShell.Abstractions.csproj");
-        var relativeProjectReference = Path.GetRelativePath(projectDirectory, abstractionsProjectPath);
-
-        return $$"""
-<Project Sdk="Microsoft.NET.Sdk">
-
-  <PropertyGroup>
-    <TargetFramework>net10.0</TargetFramework>
-    <ImplicitUsings>enable</ImplicitUsings>
-    <Nullable>enable</Nullable>
-  </PropertyGroup>
-
-  <ItemGroup>
-    <ProjectReference Include="{{relativeProjectReference}}" />
-  </ItemGroup>
-
-</Project>
-""";
-    }
-
-    private static string GetGeneratedCommandContents()
-    {
-        return """
-using ReaperShell.Abstractions;
-
-namespace HelloCommand;
-
-public sealed class HelloCommand : IShellCommand
-{
-    public string Name => "hello";
-
-    public string Description => "Prints a hello message from a live-loaded command.";
-
-    public Task<int> ExecuteAsync(
-        ShellContext context,
-        IReadOnlyList<string> args,
-        CancellationToken cancellationToken = default)
-    {
-        context.WriteLine("Hello from a live-loaded ReaperShell command.");
-        return Task.FromResult(0);
-    }
-}
-""";
     }
 }
 
