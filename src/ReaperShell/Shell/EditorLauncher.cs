@@ -49,7 +49,7 @@ public sealed class EditorLauncher
         }
     }
 
-    private async Task<string?> ResolveEditorCommandAsync(
+    public async Task<string?> ResolveEditorCommandAsync(
         ShellContext context,
         CancellationToken cancellationToken)
     {
@@ -70,7 +70,13 @@ public sealed class EditorLauncher
             return editorFromEnvironment;
         }
 
-        return await IsCommandAvailableAsync("code", context, cancellationToken) ? "code" : null;
+        if (await IsCommandAvailableAsync("code", context, cancellationToken))
+        {
+            return "code";
+        }
+
+        var visualStudioCodePath = GetWindowsVisualStudioCodePath();
+        return visualStudioCodePath is null ? null : QuoteIfNeeded(visualStudioCodePath);
     }
 
     private async Task<bool> IsCommandAvailableAsync(
@@ -86,5 +92,37 @@ public sealed class EditorLauncher
             cancellationToken: cancellationToken);
 
         return result.ExitCode == 0;
+    }
+
+    private static string QuoteIfNeeded(string commandPath)
+    {
+        return commandPath.Contains(' ') ? $"\"{commandPath}\"" : commandPath;
+    }
+
+    private static string? GetWindowsVisualStudioCodePath()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return null;
+        }
+
+        var candidatePaths = new[]
+        {
+            Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "Programs",
+                "Microsoft VS Code",
+                "Code.exe"),
+            Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles),
+                "Microsoft VS Code",
+                "Code.exe"),
+            Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86),
+                "Microsoft VS Code",
+                "Code.exe")
+        };
+
+        return candidatePaths.FirstOrDefault(File.Exists);
     }
 }

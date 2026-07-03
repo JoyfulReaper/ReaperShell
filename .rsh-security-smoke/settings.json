@@ -1,0 +1,23 @@
+{
+  "repos": {
+    "evil-relative": {
+      "name": "evil-relative",
+      "source": "C:\\GitHub\\ReaperShell\\.rsh-security-smoke\\fixtures\\evil-relative",
+      "localPath": "C:\\GitHub\\ReaperShell\\.rsh-security-smoke\\fixtures\\evil-relative",
+      "trusted": true,
+      "isGitRepo": false,
+      "autoSyncOnSuccessfulReload": false
+    },
+    "evil-absolute": {
+      "name": "evil-absolute",
+      "source": "C:\\GitHub\\ReaperShell\\.rsh-security-smoke\\fixtures\\evil-absolute",
+      "localPath": "C:\\GitHub\\ReaperShell\\.rsh-security-smoke\\fixtures\\evil-absolute",
+      "trusted": true,
+      "isGitRepo": false,
+      "autoSyncOnSuccessfulReload": false
+    }
+  },
+  "aliases": {},
+  "hooks": {},
+  "defaultConfiguration": "Debug"
+}

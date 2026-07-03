@@ -9,6 +9,7 @@ public sealed class DoctorCommand : IShellCommand
     private readonly CommandPackManager _commandPackManager;
     private readonly CommandParser _commandParser = new();
     private readonly CommandRegistry _commandRegistry;
+    private readonly EditorLauncher _editorLauncher;
     private readonly ProcessRunner _processRunner;
     private readonly ShellSettings _settings;
     private readonly string _stateDirectory;
@@ -19,6 +20,7 @@ public sealed class DoctorCommand : IShellCommand
         ProcessRunner processRunner,
         CommandRegistry commandRegistry,
         CommandPackManager commandPackManager,
+        EditorLauncher editorLauncher,
         ShellWatchService watchService,
         string stateDirectory)
     {
@@ -26,6 +28,7 @@ public sealed class DoctorCommand : IShellCommand
         _processRunner = processRunner;
         _commandRegistry = commandRegistry;
         _commandPackManager = commandPackManager;
+        _editorLauncher = editorLauncher;
         _watchService = watchService;
         _stateDirectory = stateDirectory;
     }
@@ -154,7 +157,7 @@ public sealed class DoctorCommand : IShellCommand
             "dotnet executable is unavailable.",
             cancellationToken);
 
-        var editorCommand = ResolveExplicitEditorCommand();
+        var editorCommand = await _editorLauncher.ResolveEditorCommandAsync(context, cancellationToken);
         if (editorCommand is not null)
         {
             var editorTokens = _commandParser.Parse(editorCommand);
@@ -175,15 +178,7 @@ public sealed class DoctorCommand : IShellCommand
             return;
         }
 
-        var codeAvailable = await IsExecutableOnPathAsync("code", context, cancellationToken);
-        if (codeAvailable)
-        {
-            report.Ok("Default 'code' editor fallback is available.");
-        }
-        else
-        {
-            report.Warn("No editor command is configured, and the default 'code' fallback was not found.");
-        }
+        report.Warn("No editor command is configured, and the default 'code' fallback was not found.");
     }
 
     private async Task CheckReposAsync(
@@ -511,6 +506,11 @@ public sealed class DoctorCommand : IShellCommand
         ShellContext context,
         CancellationToken cancellationToken)
     {
+        if (Path.IsPathRooted(executable))
+        {
+            return File.Exists(executable);
+        }
+
         var probeExecutable = OperatingSystem.IsWindows() ? "where" : "which";
         var result = await _processRunner.RunAsync(
             probeExecutable,
@@ -518,28 +518,6 @@ public sealed class DoctorCommand : IShellCommand
             context.WorkingDirectory.FullName,
             cancellationToken: cancellationToken);
         return result.ExitCode == 0;
-    }
-
-    private string? ResolveExplicitEditorCommand()
-    {
-        if (!string.IsNullOrWhiteSpace(_settings.EditorCommand))
-        {
-            return _settings.EditorCommand;
-        }
-
-        var editorFromEnvironment = Environment.GetEnvironmentVariable("RSH_EDITOR");
-        if (!string.IsNullOrWhiteSpace(editorFromEnvironment))
-        {
-            return editorFromEnvironment;
-        }
-
-        editorFromEnvironment = Environment.GetEnvironmentVariable("EDITOR");
-        if (!string.IsNullOrWhiteSpace(editorFromEnvironment))
-        {
-            return editorFromEnvironment;
-        }
-
-        return null;
     }
 
     private static void AppendCommandOutput(List<string> details, ProcessRunResult result)

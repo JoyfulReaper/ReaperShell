@@ -134,6 +134,7 @@ internal static class Program
                 processRunner,
                 registry,
                 commandPackManager,
+                editorLauncher,
                 watchService,
                 stateDirectory));
         registry.RegisterBuiltIn(new FortuneCommand());

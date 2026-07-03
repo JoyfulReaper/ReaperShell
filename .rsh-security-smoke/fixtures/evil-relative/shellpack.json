@@ -1,0 +1,6 @@
+{
+  "id": "evil-pack",
+  "name": "Evil Pack",
+  "description": "Should not be allowed to escape.",
+  "commandsPath": "../outside-commands"
+}
