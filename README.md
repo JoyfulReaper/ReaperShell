@@ -215,16 +215,16 @@ Diagnostics:
 
 Smoke artifacts:
 
-- [scripts/smoke-sample.rsh](/C:/GitHub/ReaperShell/scripts/smoke-sample.rsh)
-- [scripts/smoke-generated.rsh](/C:/GitHub/ReaperShell/scripts/smoke-generated.rsh)
-- [scripts/smoke-repo-lifecycle.rsh](/C:/GitHub/ReaperShell/scripts/smoke-repo-lifecycle.rsh)
-- [scripts/smoke-customization.rsh](/C:/GitHub/ReaperShell/scripts/smoke-customization.rsh)
-- [scripts/smoke-hooks.rsh](/C:/GitHub/ReaperShell/scripts/smoke-hooks.rsh)
-- [scripts/smoke-doctor.rsh](/C:/GitHub/ReaperShell/scripts/smoke-doctor.rsh)
-- [scripts/smoke-command-forge.rsh](/C:/GitHub/ReaperShell/scripts/smoke-command-forge.rsh)
-- [scripts/run-validation-smoke.ps1](/C:/GitHub/ReaperShell/scripts/run-validation-smoke.ps1)
-- [scripts/run-security-smoke.ps1](/C:/GitHub/ReaperShell/scripts/run-security-smoke.ps1)
-- [scripts/run-smoke.ps1](/C:/GitHub/ReaperShell/scripts/run-smoke.ps1)
+- [scripts/smoke-sample.rsh]
+- [scripts/smoke-generated.rsh]
+- [scripts/smoke-repo-lifecycle.rsh]
+- [scripts/smoke-customization.rsh]
+- [scripts/smoke-hooks.rsh]
+- [scripts/smoke-doctor.rsh]
+- [scripts/smoke-command-forge.rsh]
+- [scripts/run-validation-smoke.ps1]
+- [scripts/run-security-smoke.ps1]
+- [scripts/run-smoke.ps1]
 
 Run the full smoke harness:
 
@@ -252,10 +252,10 @@ What ReaperShell does try to do:
 
 High-level layout:
 
-- [src/ReaperShell](/C:/GitHub/ReaperShell/src/ReaperShell) - host application, built-ins, shell runtime, plugin loader
-- [src/ReaperShell.Abstractions](/C:/GitHub/ReaperShell/src/ReaperShell.Abstractions) - shared command contract for host and plugins
-- [sample-packs/hello-pack](/C:/GitHub/ReaperShell/sample-packs/hello-pack) - sample live-loadable command pack
-- [scripts](/C:/GitHub/ReaperShell/scripts) - smoke scripts and validation/security harnesses
+- [src/ReaperShell] - host application, built-ins, shell runtime, plugin loader
+- [src/ReaperShell.Abstractions] - shared command contract for host and plugins
+- [sample-packs/hello-pack] - sample live-loadable command pack
+- [scripts] - smoke scripts and validation/security harnesses
 
 Runtime state:
 
