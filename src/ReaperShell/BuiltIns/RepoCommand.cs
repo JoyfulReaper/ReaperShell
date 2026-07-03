@@ -55,6 +55,7 @@ public sealed class RepoCommand : IShellCommand
         {
             "add" => AddAsync(context, args, cancellationToken),
             "list" => ListAsync(context, args),
+            "prune-duplicates" => PruneDuplicatesAsync(context, args, cancellationToken),
             "trust" => TrustAsync(context, args, cancellationToken),
             "untrust" => UntrustAsync(context, args, cancellationToken),
             "status" => StatusAsync(context, args, cancellationToken),
@@ -107,6 +108,12 @@ public sealed class RepoCommand : IShellCommand
         var localCandidate = Path.GetFullPath(source, context.WorkingDirectory.FullName);
         if (Directory.Exists(localCandidate))
         {
+            if (TryFindRepoByLocalPath(localCandidate, out var existingRepo))
+            {
+                context.WriteErrorLine($"Repo path is already registered as '{existingRepo.Name}': {localCandidate}");
+                return 1;
+            }
+
             repo = new CommandRepoSettings
             {
                 Name = name,
@@ -122,6 +129,12 @@ public sealed class RepoCommand : IShellCommand
             Directory.CreateDirectory(reposRoot);
 
             var clonePath = Path.Combine(reposRoot, name);
+            if (TryFindRepoByLocalPath(clonePath, out var existingRepo))
+            {
+                context.WriteErrorLine($"Repo path is already registered as '{existingRepo.Name}': {clonePath}");
+                return 1;
+            }
+
             if (Directory.Exists(clonePath))
             {
                 context.WriteErrorLine($"The destination already exists: {clonePath}");
@@ -187,6 +200,63 @@ public sealed class RepoCommand : IShellCommand
         }
 
         return Task.FromResult(0);
+    }
+
+    private async Task<int> PruneDuplicatesAsync(
+        ShellContext context,
+        IReadOnlyList<string> args,
+        CancellationToken cancellationToken)
+    {
+        if (args.Count != 1)
+        {
+            context.WriteErrorLine("Usage: repo prune-duplicates");
+            return 1;
+        }
+
+        var duplicateGroups = _settings.Repos.Values
+            .GroupBy(repo => NormalizeRepoPath(repo.LocalPath), GetPathComparer())
+            .Select(group => group
+                .OrderBy(repo => repo.Name, StringComparer.OrdinalIgnoreCase)
+                .ToArray())
+            .Where(group => group.Length > 1)
+            .OrderBy(group => group[0].Name, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        if (duplicateGroups.Length == 0)
+        {
+            context.WriteLine("No duplicate repo registrations were found.");
+            return 0;
+        }
+
+        var loadedDuplicates = duplicateGroups
+            .SelectMany(group => group)
+            .Where(repo => _commandPackManager.IsLoaded(repo.Name))
+            .OrderBy(repo => repo.Name, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        if (loadedDuplicates.Length > 0)
+        {
+            context.WriteErrorLine(
+                $"Unload duplicate repos before pruning: {string.Join(", ", loadedDuplicates.Select(repo => repo.Name))}");
+            return 1;
+        }
+
+        var removedRepoNames = new List<string>();
+        foreach (var group in duplicateGroups)
+        {
+            var keptRepo = group[0];
+            foreach (var duplicateRepo in group.Skip(1))
+            {
+                _watchService.StopWatching(duplicateRepo.Name, out _);
+                _settings.Repos.Remove(duplicateRepo.Name);
+                removedRepoNames.Add(duplicateRepo.Name);
+                context.WriteLine(
+                    $"Removed duplicate repo '{duplicateRepo.Name}' for path {NormalizeRepoPath(duplicateRepo.LocalPath)}. Keeping '{keptRepo.Name}'.");
+            }
+        }
+
+        await SaveSettingsAsync(cancellationToken);
+        context.WriteLine($"Pruned {removedRepoNames.Count} duplicate repo registration(s).");
+        return 0;
     }
 
     private async Task<int> TrustAsync(
@@ -349,6 +419,12 @@ public sealed class RepoCommand : IShellCommand
         }
 
         var repoRoot = Path.Combine(GetManagedReposRoot(), name);
+        if (TryFindRepoByLocalPath(repoRoot, out var existingRepo))
+        {
+            context.WriteErrorLine($"Repo path is already registered as '{existingRepo.Name}': {repoRoot}");
+            return 1;
+        }
+
         if (Directory.Exists(repoRoot))
         {
             context.WriteErrorLine($"The destination already exists: {repoRoot}");
@@ -1078,7 +1154,7 @@ public sealed class RepoCommand : IShellCommand
     private static int WriteUsage(ShellContext context)
     {
         context.WriteErrorLine(
-            "Usage: repo <add|list|trust|untrust|status|sync|build|load|unload|reload|new|remove|commit|push|save|build-all|load-all|reload-all|autosync|watch|unwatch|watch-list> ...");
+            "Usage: repo <add|list|prune-duplicates|trust|untrust|status|sync|build|load|unload|reload|new|remove|commit|push|save|build-all|load-all|reload-all|autosync|watch|unwatch|watch-list> ...");
         return 1;
     }
 
@@ -1120,6 +1196,36 @@ public sealed class RepoCommand : IShellCommand
 
         return source.Contains("git@", StringComparison.OrdinalIgnoreCase) ||
                source.EndsWith(".git", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private bool TryFindRepoByLocalPath(string candidatePath, out CommandRepoSettings repo)
+    {
+        var normalizedCandidatePath = NormalizeRepoPath(candidatePath);
+        var comparer = GetPathComparer();
+
+        foreach (var existingRepo in _settings.Repos.Values.OrderBy(repo => repo.Name, StringComparer.OrdinalIgnoreCase))
+        {
+            if (comparer.Equals(NormalizeRepoPath(existingRepo.LocalPath), normalizedCandidatePath))
+            {
+                repo = existingRepo;
+                return true;
+            }
+        }
+
+        repo = null!;
+        return false;
+    }
+
+    private static StringComparer GetPathComparer()
+    {
+        return CommandPackPathResolver.PathComparison == StringComparison.OrdinalIgnoreCase
+            ? StringComparer.OrdinalIgnoreCase
+            : StringComparer.Ordinal;
+    }
+
+    private static string NormalizeRepoPath(string path)
+    {
+        return Path.GetFullPath(path);
     }
 
     private static bool TryValidateRepoName(string name, ShellContext context)

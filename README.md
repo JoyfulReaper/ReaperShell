@@ -83,6 +83,8 @@ rsh> plugins
 
 ReaperShell supports a focused set of repo lifecycle and Git-backed workflows:
 
+- `repo add` rejects registering the same local path under multiple repo names.
+- `repo prune-duplicates` removes old duplicate repo registrations from settings without deleting files.
 - `repo remove <name>` removes a repo from settings and leaves files in place.
 - `repo remove <name> --delete-files` also deletes the local repo directory, but only when that directory lives under the configured state directory.
 - `repo commit <name> "message"` runs `git add .` and `git commit -m ...` for Git-backed repos.

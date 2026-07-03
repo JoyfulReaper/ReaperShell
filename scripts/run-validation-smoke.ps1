@@ -58,9 +58,38 @@ try {
         Invoke-ExpectedFailure "repo new invalid name $name" "repo new $name"
     }
 
+    & dotnet $shellDll --state-dir $stateDir --command "repo add duplicate-a `"$samplePack`""
+    if ($LASTEXITCODE -ne 0) {
+        throw 'Failed to register duplicate-a test repo.'
+    }
+
+    Invoke-ExpectedFailure 'repo add rejects duplicate LocalPath' "repo add duplicate-b `"$samplePack`""
+    & dotnet $shellDll --state-dir $stateDir --command 'repo prune-duplicates'
+    if ($LASTEXITCODE -ne 0) {
+        throw 'repo prune-duplicates should succeed when no duplicates exist.'
+    }
+
     & dotnet $shellDll --state-dir $stateDir --command 'repo new forge-smoke'
     if ($LASTEXITCODE -ne 0) {
         throw 'Failed to create forge-smoke test repo.'
+    }
+
+    $settingsPath = Join-Path $stateDir 'settings.json'
+    $settings = Get-Content -LiteralPath $settingsPath -Raw | ConvertFrom-Json
+    $duplicateRepo = [pscustomobject]@{
+        name = 'duplicate-b'
+        source = $samplePack
+        localPath = [System.IO.Path]::GetFullPath($samplePack)
+        trusted = $false
+        isGitRepo = $false
+        autoSyncOnSuccessfulReload = $false
+    }
+    Add-Member -InputObject $settings.repos -NotePropertyName 'duplicate-b' -NotePropertyValue $duplicateRepo -Force
+    $settings | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $settingsPath
+
+    & dotnet $shellDll --state-dir $stateDir --command 'repo prune-duplicates'
+    if ($LASTEXITCODE -ne 0) {
+        throw 'repo prune-duplicates should remove duplicate registrations from settings.'
     }
 
     Invoke-ExpectedFailure 'command new rejects leading-digit name' 'command new forge-smoke 123-bad'
