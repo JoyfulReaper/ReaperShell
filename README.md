@@ -62,14 +62,31 @@ rsh> repo reload sample
 rsh> plugins
 ```
 
+## Repo Commands
+
+ReaperShell supports a focused set of repo lifecycle and Git-backed workflows:
+
+- `repo remove <name>` removes a repo from settings and leaves files in place.
+- `repo remove <name> --delete-files` also deletes the local repo directory, but only when that directory lives under the configured state directory.
+- `repo commit <name> "message"` runs `git add .` and `git commit -m ...` for Git-backed repos.
+- `repo push <name>` runs `git push` for Git-backed repos.
+- `repo save <name> "message"` commits and then pushes, while treating "nothing to commit" as a non-error.
+- `repo build-all` builds all trusted repos.
+- `repo load-all` loads all trusted repos that are not already loaded.
+- `repo reload-all` reloads all trusted repos and prints a compact summary.
+- `repo autosync <name> on|off` controls whether a successful `repo reload <name>` should automatically commit and push Git-backed changes.
+
+Auto-sync only applies to trusted repos because loaded command packs execute code on your machine.
+
 ## Smoke Tests
 
 The repository includes smoke-test scripts for the sample pack and generated packs:
 
 - [scripts/smoke-sample.rsh](/C:/GitHub/ReaperShell/scripts/smoke-sample.rsh)
 - [scripts/smoke-generated.rsh](/C:/GitHub/ReaperShell/scripts/smoke-generated.rsh)
+- [scripts/smoke-repo-lifecycle.rsh](/C:/GitHub/ReaperShell/scripts/smoke-repo-lifecycle.rsh)
 
-Run both through the convenience PowerShell harness:
+Run all three through the convenience PowerShell harness:
 
 ```powershell
 ./scripts/run-smoke.ps1

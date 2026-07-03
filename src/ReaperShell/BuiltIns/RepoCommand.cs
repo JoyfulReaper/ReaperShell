@@ -1,4 +1,3 @@
-using System.Text.Json;
 using ReaperShell.Abstractions;
 using ReaperShell.Plugins;
 using ReaperShell.Shell;
@@ -49,7 +48,7 @@ public sealed class RepoCommand : IShellCommand
         return args[0].ToLowerInvariant() switch
         {
             "add" => AddAsync(context, args, cancellationToken),
-            "list" => ListAsync(context),
+            "list" => ListAsync(context, args),
             "trust" => TrustAsync(context, args, cancellationToken),
             "untrust" => UntrustAsync(context, args, cancellationToken),
             "status" => StatusAsync(context, args, cancellationToken),
@@ -59,6 +58,14 @@ public sealed class RepoCommand : IShellCommand
             "unload" => UnloadAsync(context, args),
             "reload" => ReloadAsync(context, args, cancellationToken),
             "new" => NewAsync(context, args, cancellationToken),
+            "remove" => RemoveAsync(context, args, cancellationToken),
+            "commit" => CommitAsync(context, args, cancellationToken),
+            "push" => PushAsync(context, args, cancellationToken),
+            "save" => SaveAsync(context, args, cancellationToken),
+            "build-all" => BuildAllAsync(context, args, cancellationToken),
+            "load-all" => LoadAllAsync(context, args, cancellationToken),
+            "reload-all" => ReloadAllAsync(context, args, cancellationToken),
+            "autosync" => AutoSyncAsync(context, args, cancellationToken),
             _ => Task.FromResult(WriteUsage(context))
         };
     }
@@ -107,13 +114,12 @@ public sealed class RepoCommand : IShellCommand
                 return 1;
             }
 
-            var cloneResult = await _processRunner.RunAsync(
-                "git",
+            var cloneResult = await RunGitAsync(
+                repoName: name,
                 ["clone", source, clonePath],
                 context.WorkingDirectory.FullName,
-                context.WriteLine,
-                context.WriteErrorLine,
-                cancellationToken: cancellationToken);
+                context,
+                cancellationToken);
 
             if (cloneResult.ExitCode != 0)
             {
@@ -142,8 +148,14 @@ public sealed class RepoCommand : IShellCommand
         return 0;
     }
 
-    private Task<int> ListAsync(ShellContext context)
+    private Task<int> ListAsync(ShellContext context, IReadOnlyList<string> args)
     {
+        if (args.Count != 1)
+        {
+            context.WriteErrorLine("Usage: repo list");
+            return Task.FromResult(1);
+        }
+
         if (_settings.Repos.Count == 0)
         {
             context.WriteLine("No repos are registered.");
@@ -155,7 +167,9 @@ public sealed class RepoCommand : IShellCommand
             var loadedState = _commandPackManager.IsLoaded(repo.Name) ? "loaded" : "unloaded";
             var trustState = repo.Trusted ? "trusted" : "untrusted";
             var gitState = repo.IsGitRepo ? "git" : "local";
-            context.WriteLine($"{repo.Name} | {gitState} | {trustState} | {loadedState} | {repo.LocalPath}");
+            var autoSyncState = repo.AutoSyncOnSuccessfulReload ? "autosync=on" : "autosync=off";
+            context.WriteLine(
+                $"{repo.Name} | {gitState} | {trustState} | {loadedState} | {autoSyncState} | {repo.LocalPath}");
         }
 
         return Task.FromResult(0);
@@ -172,7 +186,7 @@ public sealed class RepoCommand : IShellCommand
         }
 
         repo.Trusted = true;
-        await _settings.SaveAsync(_stateDirectory, cancellationToken);
+        await SaveSettingsAsync(cancellationToken);
         context.WriteLine("This repo can execute code on your machine when loaded.");
         context.WriteLine($"Marked '{repo.Name}' as trusted.");
         return 0;
@@ -195,7 +209,7 @@ public sealed class RepoCommand : IShellCommand
         }
 
         repo.Trusted = false;
-        await _settings.SaveAsync(_stateDirectory, cancellationToken);
+        await SaveSettingsAsync(cancellationToken);
         context.WriteLine($"Marked '{repo.Name}' as untrusted.");
         return 0;
     }
@@ -216,13 +230,12 @@ public sealed class RepoCommand : IShellCommand
             return 0;
         }
 
-        var result = await _processRunner.RunAsync(
-            "git",
+        var result = await RunGitAsync(
+            repo.Name,
             ["status", "--short"],
             repo.LocalPath,
-            context.WriteLine,
-            context.WriteErrorLine,
-            cancellationToken: cancellationToken);
+            context,
+            cancellationToken);
 
         if (result.ExitCode == 0 && string.IsNullOrWhiteSpace(result.StandardOutput))
         {
@@ -242,21 +255,7 @@ public sealed class RepoCommand : IShellCommand
             return 1;
         }
 
-        if (!repo.IsGitRepo)
-        {
-            context.WriteErrorLine("Sync only works for Git-backed repos.");
-            return 1;
-        }
-
-        var result = await _processRunner.RunAsync(
-            "git",
-            ["pull", "--rebase"],
-            repo.LocalPath,
-            context.WriteLine,
-            context.WriteErrorLine,
-            cancellationToken: cancellationToken);
-
-        return result.ExitCode;
+        return await SyncRepoAsync(context, repo, cancellationToken);
     }
 
     private async Task<int> BuildAsync(
@@ -269,19 +268,7 @@ public sealed class RepoCommand : IShellCommand
             return 1;
         }
 
-        if (!repo.Trusted)
-        {
-            context.WriteErrorLine($"Repo '{repo.Name}' is not trusted.");
-            return 1;
-        }
-
-        var result = await _commandPackManager.BuildAsync(
-            repo,
-            _settings.DefaultConfiguration,
-            context,
-            cancellationToken);
-
-        return result.ExitCode;
+        return await BuildRepoAsync(context, repo, cancellationToken);
     }
 
     private async Task<int> LoadAsync(
@@ -294,19 +281,7 @@ public sealed class RepoCommand : IShellCommand
             return 1;
         }
 
-        if (!repo.Trusted)
-        {
-            context.WriteErrorLine($"Repo '{repo.Name}' is not trusted.");
-            return 1;
-        }
-
-        var result = await _commandPackManager.LoadAsync(
-            repo,
-            _settings.DefaultConfiguration,
-            context,
-            cancellationToken);
-
-        return result.ExitCode;
+        return await LoadRepoAsync(context, repo, cancellationToken);
     }
 
     private async Task<int> UnloadAsync(ShellContext context, IReadOnlyList<string> args)
@@ -316,14 +291,7 @@ public sealed class RepoCommand : IShellCommand
             return 1;
         }
 
-        if (!_commandPackManager.IsLoaded(repo.Name))
-        {
-            context.WriteLine($"Repo '{repo.Name}' is not loaded.");
-            return 0;
-        }
-
-        var result = await _commandPackManager.UnloadAsync(repo.Name, context);
-        return result.ExitCode;
+        return await UnloadRepoIfLoadedAsync(context, repo, writeIfNotLoaded: true);
     }
 
     private async Task<int> ReloadAsync(
@@ -336,64 +304,7 @@ public sealed class RepoCommand : IShellCommand
             return 1;
         }
 
-        if (!repo.Trusted)
-        {
-            context.WriteErrorLine($"Repo '{repo.Name}' is not trusted.");
-            return 1;
-        }
-
-        if (_commandPackManager.IsLoaded(repo.Name))
-        {
-            var unloadResult = await _commandPackManager.UnloadAsync(repo.Name, context);
-            if (unloadResult.ExitCode != 0)
-            {
-                context.WriteErrorLine($"Reload failed while unloading '{repo.Name}'.");
-                return unloadResult.ExitCode;
-            }
-        }
-
-        if (repo.IsGitRepo)
-        {
-            var syncResult = await _processRunner.RunAsync(
-                "git",
-                ["pull", "--rebase"],
-                repo.LocalPath,
-                context.WriteLine,
-                context.WriteErrorLine,
-                cancellationToken: cancellationToken);
-
-            if (syncResult.ExitCode != 0)
-            {
-                context.WriteErrorLine($"Reload failed while syncing '{repo.Name}'.");
-                return syncResult.ExitCode;
-            }
-        }
-
-        var buildResult = await _commandPackManager.BuildAsync(
-            repo,
-            _settings.DefaultConfiguration,
-            context,
-            cancellationToken);
-
-        if (buildResult.ExitCode != 0)
-        {
-            context.WriteErrorLine($"Reload failed while building '{repo.Name}'.");
-            return buildResult.ExitCode;
-        }
-
-        var loadResult = await _commandPackManager.LoadAsync(
-            repo,
-            _settings.DefaultConfiguration,
-            context,
-            cancellationToken);
-
-        if (loadResult.ExitCode != 0)
-        {
-            context.WriteErrorLine($"Reload failed while loading '{repo.Name}'.");
-            return loadResult.ExitCode;
-        }
-
-        return 0;
+        return await ReloadRepoAsync(context, repo, cancellationToken);
     }
 
     private async Task<int> NewAsync(
@@ -454,7 +365,7 @@ public sealed class RepoCommand : IShellCommand
         };
 
         _settings.Repos[name] = repo;
-        await _settings.SaveAsync(_stateDirectory, cancellationToken);
+        await SaveSettingsAsync(cancellationToken);
 
         context.WriteLine($"Created local command pack at {repoRoot}");
         context.WriteLine("repo build " + name);
@@ -463,15 +374,580 @@ public sealed class RepoCommand : IShellCommand
         return 0;
     }
 
+    private async Task<int> RemoveAsync(
+        ShellContext context,
+        IReadOnlyList<string> args,
+        CancellationToken cancellationToken)
+    {
+        if (args.Count is not 2 and not 3)
+        {
+            context.WriteErrorLine("Usage: repo remove <name> [--delete-files]");
+            return 1;
+        }
+
+        var deleteFiles = false;
+        if (args.Count == 3)
+        {
+            if (!string.Equals(args[2], "--delete-files", StringComparison.OrdinalIgnoreCase))
+            {
+                context.WriteErrorLine("Usage: repo remove <name> [--delete-files]");
+                return 1;
+            }
+
+            deleteFiles = true;
+        }
+
+        if (!TryGetRepoByName(args[1], context, out var repo))
+        {
+            return 1;
+        }
+
+        if (deleteFiles && !IsManagedRepoPath(repo.LocalPath))
+        {
+            context.WriteErrorLine(
+                $"Refusing to delete files outside the configured state directory: {repo.LocalPath}");
+            return 1;
+        }
+
+        var unloadExitCode = await UnloadRepoIfLoadedAsync(context, repo, writeIfNotLoaded: false);
+        if (unloadExitCode != 0)
+        {
+            context.WriteErrorLine($"Failed to unload '{repo.Name}' before removal.");
+            return unloadExitCode;
+        }
+
+        if (deleteFiles && Directory.Exists(repo.LocalPath))
+        {
+            try
+            {
+                Directory.Delete(repo.LocalPath, recursive: true);
+            }
+            catch (Exception ex)
+            {
+                context.WriteErrorLine($"Failed to delete repo files for '{repo.Name}': {ex.Message}");
+                return 1;
+            }
+        }
+
+        _settings.Repos.Remove(repo.Name);
+        await SaveSettingsAsync(cancellationToken);
+
+        if (deleteFiles)
+        {
+            context.WriteLine($"Removed repo '{repo.Name}' and deleted files at {repo.LocalPath}");
+        }
+        else
+        {
+            context.WriteLine($"Removed repo '{repo.Name}' from settings.");
+            context.WriteLine($"Local files remain at {repo.LocalPath}");
+        }
+
+        return 0;
+    }
+
+    private async Task<int> CommitAsync(
+        ShellContext context,
+        IReadOnlyList<string> args,
+        CancellationToken cancellationToken)
+    {
+        if (args.Count != 3)
+        {
+            context.WriteErrorLine("Usage: repo commit <name> \"message\"");
+            return 1;
+        }
+
+        if (!TryGetRepoByName(args[1], context, out var repo))
+        {
+            return 1;
+        }
+
+        var commitResult = await CommitRepoAsync(context, repo, args[2], cancellationToken);
+        return commitResult.ExitCode;
+    }
+
+    private async Task<int> PushAsync(
+        ShellContext context,
+        IReadOnlyList<string> args,
+        CancellationToken cancellationToken)
+    {
+        if (args.Count != 2)
+        {
+            context.WriteErrorLine("Usage: repo push <name>");
+            return 1;
+        }
+
+        if (!TryGetRepoByName(args[1], context, out var repo))
+        {
+            return 1;
+        }
+
+        return await PushRepoAsync(context, repo, cancellationToken);
+    }
+
+    private async Task<int> SaveAsync(
+        ShellContext context,
+        IReadOnlyList<string> args,
+        CancellationToken cancellationToken)
+    {
+        if (args.Count != 3)
+        {
+            context.WriteErrorLine("Usage: repo save <name> \"message\"");
+            return 1;
+        }
+
+        if (!TryGetRepoByName(args[1], context, out var repo))
+        {
+            return 1;
+        }
+
+        return await SaveRepoAsync(
+            context,
+            repo,
+            args[2],
+            pushWhenNothingWasCommitted: true,
+            cancellationToken);
+    }
+
+    private async Task<int> BuildAllAsync(
+        ShellContext context,
+        IReadOnlyList<string> args,
+        CancellationToken cancellationToken)
+    {
+        if (args.Count != 1)
+        {
+            context.WriteErrorLine("Usage: repo build-all");
+            return 1;
+        }
+
+        return await RunTrustedRepoOperationAsync(
+            "build-all",
+            context,
+            skipReason: _ => null,
+            repo => BuildRepoAsync(context, repo, cancellationToken));
+    }
+
+    private async Task<int> LoadAllAsync(
+        ShellContext context,
+        IReadOnlyList<string> args,
+        CancellationToken cancellationToken)
+    {
+        if (args.Count != 1)
+        {
+            context.WriteErrorLine("Usage: repo load-all");
+            return 1;
+        }
+
+        return await RunTrustedRepoOperationAsync(
+            "load-all",
+            context,
+            repo => _commandPackManager.IsLoaded(repo.Name) ? "already loaded" : null,
+            repo => LoadRepoAsync(context, repo, cancellationToken));
+    }
+
+    private async Task<int> ReloadAllAsync(
+        ShellContext context,
+        IReadOnlyList<string> args,
+        CancellationToken cancellationToken)
+    {
+        if (args.Count != 1)
+        {
+            context.WriteErrorLine("Usage: repo reload-all");
+            return 1;
+        }
+
+        return await RunTrustedRepoOperationAsync(
+            "reload-all",
+            context,
+            skipReason: _ => null,
+            repo => ReloadRepoAsync(context, repo, cancellationToken));
+    }
+
+    private async Task<int> AutoSyncAsync(
+        ShellContext context,
+        IReadOnlyList<string> args,
+        CancellationToken cancellationToken)
+    {
+        if (args.Count != 3)
+        {
+            context.WriteErrorLine("Usage: repo autosync <name> <on|off>");
+            return 1;
+        }
+
+        if (!TryGetRepoByName(args[1], context, out var repo))
+        {
+            return 1;
+        }
+
+        var autoSyncEnabled = args[2].ToLowerInvariant() switch
+        {
+            "on" => true,
+            "off" => false,
+            _ => (bool?)null
+        };
+
+        if (autoSyncEnabled is null)
+        {
+            context.WriteErrorLine("Usage: repo autosync <name> <on|off>");
+            return 1;
+        }
+
+        repo.AutoSyncOnSuccessfulReload = autoSyncEnabled.Value;
+        await SaveSettingsAsync(cancellationToken);
+        context.WriteLine(
+            $"Auto-sync on successful reload for '{repo.Name}' is now {(repo.AutoSyncOnSuccessfulReload ? "on" : "off")}.");
+        return 0;
+    }
+
+    private async Task<int> BuildRepoAsync(
+        ShellContext context,
+        CommandRepoSettings repo,
+        CancellationToken cancellationToken)
+    {
+        if (!repo.Trusted)
+        {
+            context.WriteErrorLine($"Repo '{repo.Name}' is not trusted.");
+            return 1;
+        }
+
+        var result = await _commandPackManager.BuildAsync(
+            repo,
+            _settings.DefaultConfiguration,
+            context,
+            cancellationToken);
+
+        return result.ExitCode;
+    }
+
+    private async Task<int> LoadRepoAsync(
+        ShellContext context,
+        CommandRepoSettings repo,
+        CancellationToken cancellationToken)
+    {
+        if (!repo.Trusted)
+        {
+            context.WriteErrorLine($"Repo '{repo.Name}' is not trusted.");
+            return 1;
+        }
+
+        var result = await _commandPackManager.LoadAsync(
+            repo,
+            _settings.DefaultConfiguration,
+            context,
+            cancellationToken);
+
+        return result.ExitCode;
+    }
+
+    private async Task<int> ReloadRepoAsync(
+        ShellContext context,
+        CommandRepoSettings repo,
+        CancellationToken cancellationToken)
+    {
+        if (!repo.Trusted)
+        {
+            context.WriteErrorLine($"Repo '{repo.Name}' is not trusted.");
+            return 1;
+        }
+
+        var unloadExitCode = await UnloadRepoIfLoadedAsync(context, repo, writeIfNotLoaded: false);
+        if (unloadExitCode != 0)
+        {
+            context.WriteErrorLine($"Reload failed while unloading '{repo.Name}'.");
+            return unloadExitCode;
+        }
+
+        if (repo.IsGitRepo)
+        {
+            var syncExitCode = await SyncRepoAsync(context, repo, cancellationToken);
+            if (syncExitCode != 0)
+            {
+                context.WriteErrorLine($"Reload failed while syncing '{repo.Name}'.");
+                return syncExitCode;
+            }
+        }
+
+        var buildExitCode = await BuildRepoAsync(context, repo, cancellationToken);
+        if (buildExitCode != 0)
+        {
+            context.WriteErrorLine($"Reload failed while building '{repo.Name}'.");
+            return buildExitCode;
+        }
+
+        var loadExitCode = await LoadRepoAsync(context, repo, cancellationToken);
+        if (loadExitCode != 0)
+        {
+            context.WriteErrorLine($"Reload failed while loading '{repo.Name}'.");
+            return loadExitCode;
+        }
+
+        if (!repo.IsGitRepo || !repo.AutoSyncOnSuccessfulReload)
+        {
+            return 0;
+        }
+
+        var saveExitCode = await SaveRepoAsync(
+            context,
+            repo,
+            $"Update {repo.Name} command pack",
+            pushWhenNothingWasCommitted: false,
+            cancellationToken);
+
+        if (saveExitCode != 0)
+        {
+            context.WriteErrorLine($"Reload succeeded but auto-sync failed for '{repo.Name}'.");
+        }
+
+        return saveExitCode;
+    }
+
+    private async Task<int> SyncRepoAsync(
+        ShellContext context,
+        CommandRepoSettings repo,
+        CancellationToken cancellationToken)
+    {
+        if (!repo.IsGitRepo)
+        {
+            context.WriteErrorLine("Sync only works for Git-backed repos.");
+            return 1;
+        }
+
+        var result = await RunGitAsync(
+            repo.Name,
+            ["pull", "--rebase"],
+            repo.LocalPath,
+            context,
+            cancellationToken);
+
+        return result.ExitCode;
+    }
+
+    private async Task<int> PushRepoAsync(
+        ShellContext context,
+        CommandRepoSettings repo,
+        CancellationToken cancellationToken)
+    {
+        if (!repo.IsGitRepo)
+        {
+            context.WriteErrorLine($"Repo '{repo.Name}' is not a Git repo.");
+            return 1;
+        }
+
+        var result = await RunGitAsync(
+            repo.Name,
+            ["push"],
+            repo.LocalPath,
+            context,
+            cancellationToken);
+
+        return result.ExitCode;
+    }
+
+    private async Task<CommitOperationResult> CommitRepoAsync(
+        ShellContext context,
+        CommandRepoSettings repo,
+        string message,
+        CancellationToken cancellationToken)
+    {
+        if (!repo.IsGitRepo)
+        {
+            context.WriteErrorLine($"Repo '{repo.Name}' is not a Git repo.");
+            return new CommitOperationResult(1, false, false);
+        }
+
+        var addResult = await RunGitAsync(
+            repo.Name,
+            ["add", "."],
+            repo.LocalPath,
+            context,
+            cancellationToken);
+
+        if (addResult.ExitCode != 0)
+        {
+            return new CommitOperationResult(addResult.ExitCode, false, false);
+        }
+
+        var commitResult = await RunGitAsync(
+            repo.Name,
+            ["commit", "-m", message],
+            repo.LocalPath,
+            context,
+            cancellationToken);
+
+        if (commitResult.ExitCode == 0)
+        {
+            return new CommitOperationResult(0, true, false);
+        }
+
+        if (HasNothingToCommit(commitResult))
+        {
+            context.WriteLine($"Nothing to commit for '{repo.Name}'.");
+            return new CommitOperationResult(0, false, true);
+        }
+
+        return new CommitOperationResult(commitResult.ExitCode, false, false);
+    }
+
+    private async Task<int> SaveRepoAsync(
+        ShellContext context,
+        CommandRepoSettings repo,
+        string message,
+        bool pushWhenNothingWasCommitted,
+        CancellationToken cancellationToken)
+    {
+        var commitResult = await CommitRepoAsync(context, repo, message, cancellationToken);
+        if (commitResult.ExitCode != 0)
+        {
+            return commitResult.ExitCode;
+        }
+
+        if (commitResult.HadNoChanges)
+        {
+            if (!pushWhenNothingWasCommitted)
+            {
+                context.WriteLine($"Skipped push for '{repo.Name}' because there was nothing new to commit.");
+                return 0;
+            }
+
+            context.WriteLine(
+                $"No new commit was created for '{repo.Name}'. Attempting push in case local commits are still pending.");
+        }
+
+        return await PushRepoAsync(context, repo, cancellationToken);
+    }
+
+    private async Task<int> RunTrustedRepoOperationAsync(
+        string operationName,
+        ShellContext context,
+        Func<CommandRepoSettings, string?> skipReason,
+        Func<CommandRepoSettings, Task<int>> operation)
+    {
+        var trustedRepos = _settings.Repos.Values
+            .Where(repo => repo.Trusted)
+            .OrderBy(repo => repo.Name, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        if (trustedRepos.Length == 0)
+        {
+            context.WriteLine("No trusted repos are registered.");
+            return 0;
+        }
+
+        var succeeded = 0;
+        var failed = 0;
+        var skipped = 0;
+        var failedRepos = new List<string>();
+
+        foreach (var repo in trustedRepos)
+        {
+            var reason = skipReason(repo);
+            if (reason is not null)
+            {
+                skipped++;
+                context.WriteLine($"Skipping '{repo.Name}' because it is {reason}.");
+                continue;
+            }
+
+            context.WriteLine($"{operationName}: {repo.Name}");
+            var exitCode = await operation(repo);
+            if (exitCode == 0)
+            {
+                succeeded++;
+            }
+            else
+            {
+                failed++;
+                failedRepos.Add(repo.Name);
+            }
+        }
+
+        context.WriteLine($"{operationName} summary: {succeeded} succeeded, {failed} failed, {skipped} skipped.");
+        if (failedRepos.Count > 0)
+        {
+            context.WriteLine($"Failed repos: {string.Join(", ", failedRepos)}");
+        }
+
+        return failed > 0 ? 1 : 0;
+    }
+
+    private async Task<int> UnloadRepoIfLoadedAsync(
+        ShellContext context,
+        CommandRepoSettings repo,
+        bool writeIfNotLoaded)
+    {
+        if (!_commandPackManager.IsLoaded(repo.Name))
+        {
+            if (writeIfNotLoaded)
+            {
+                context.WriteLine($"Repo '{repo.Name}' is not loaded.");
+            }
+
+            return 0;
+        }
+
+        context.WriteLine($"Repo '{repo.Name}' is loaded. Unloading it first.");
+        var result = await _commandPackManager.UnloadAsync(repo.Name, context);
+        return result.ExitCode;
+    }
+
+    private async Task<ProcessRunResult> RunGitAsync(
+        string repoName,
+        IReadOnlyList<string> arguments,
+        string workingDirectory,
+        ShellContext context,
+        CancellationToken cancellationToken)
+    {
+        var result = await _processRunner.RunAsync(
+            "git",
+            arguments,
+            workingDirectory,
+            context.WriteLine,
+            context.WriteErrorLine,
+            cancellationToken: cancellationToken);
+
+        if (result.ExitCode != 0 && result.StandardOutput.Length == 0 && result.StandardError.Length == 0)
+        {
+            context.WriteErrorLine($"Git command failed for '{repoName}'.");
+        }
+
+        return result;
+    }
+
+    private async Task SaveSettingsAsync(CancellationToken cancellationToken)
+    {
+        await _settings.SaveAsync(_stateDirectory, cancellationToken);
+    }
+
     private static int WriteUsage(ShellContext context)
     {
-        context.WriteErrorLine("Usage: repo <add|list|trust|untrust|status|sync|build|load|unload|reload|new> ...");
+        context.WriteErrorLine(
+            "Usage: repo <add|list|trust|untrust|status|sync|build|load|unload|reload|new|remove|commit|push|save|build-all|load-all|reload-all|autosync> ...");
         return 1;
     }
 
     private string GetManagedReposRoot()
     {
         return Path.Combine(_stateDirectory, "repos");
+    }
+
+    private bool IsManagedRepoPath(string path)
+    {
+        var fullStateDirectory = AppendDirectorySeparator(Path.GetFullPath(_stateDirectory));
+        var fullRepoPath = Path.GetFullPath(path);
+        return fullRepoPath.StartsWith(fullStateDirectory, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string AppendDirectorySeparator(string path)
+    {
+        return path.EndsWith(Path.DirectorySeparatorChar)
+            ? path
+            : path + Path.DirectorySeparatorChar;
+    }
+
+    private static bool HasNothingToCommit(ProcessRunResult result)
+    {
+        var combinedOutput = $"{result.StandardOutput}\n{result.StandardError}";
+        return combinedOutput.Contains("nothing to commit", StringComparison.OrdinalIgnoreCase) ||
+               combinedOutput.Contains("no changes added to commit", StringComparison.OrdinalIgnoreCase);
     }
 
     private static bool LooksLikeGitWorkingTree(string path)
@@ -504,9 +980,16 @@ public sealed class RepoCommand : IShellCommand
             return false;
         }
 
-        if (!_settings.Repos.TryGetValue(args[1], out var foundRepo))
+        return TryGetRepoByName(args[1], context, out repo);
+    }
+
+    private bool TryGetRepoByName(string repoName, ShellContext context, out CommandRepoSettings repo)
+    {
+        repo = null!;
+
+        if (!_settings.Repos.TryGetValue(repoName, out var foundRepo))
         {
-            context.WriteErrorLine($"Repo '{args[1]}' is not registered.");
+            context.WriteErrorLine($"Repo '{repoName}' is not registered.");
             return false;
         }
 
@@ -566,3 +1049,5 @@ public sealed class HelloCommand : IShellCommand
 """;
     }
 }
+
+public sealed record CommitOperationResult(int ExitCode, bool CreatedCommit, bool HadNoChanges);

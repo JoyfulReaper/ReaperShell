@@ -66,4 +66,6 @@ public sealed class CommandRepoSettings
     public bool Trusted { get; set; }
 
     public bool IsGitRepo { get; set; }
+
+    public bool AutoSyncOnSuccessfulReload { get; set; }
 }

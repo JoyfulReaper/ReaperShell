@@ -23,12 +23,7 @@ function Invoke-Step {
     }
 }
 
-Push-Location $repoRoot
-try {
-    if (Test-Path -LiteralPath $stateDir) {
-        Remove-Item -LiteralPath $stateDir -Recurse -Force
-    }
-
+function Initialize-SmokeEnvironment {
     New-Item -ItemType Directory -Force -Path $nuGetPackages | Out-Null
     New-Item -ItemType Directory -Force -Path $appData | Out-Null
 
@@ -38,17 +33,37 @@ try {
     $env:DOTNET_NOLOGO = '1'
     $env:DOTNET_SKIP_FIRST_TIME_EXPERIENCE = '1'
     $env:NUGET_PACKAGES = $nuGetPackages
+}
+
+function Reset-SmokeState {
+    if (Test-Path -LiteralPath $stateDir) {
+        Remove-Item -LiteralPath $stateDir -Recurse -Force
+    }
+
+    Initialize-SmokeEnvironment
+}
+
+Push-Location $repoRoot
+try {
+    Reset-SmokeState
 
     Invoke-Step 'Building ReaperShell' {
         dotnet build ReaperShell.slnx
     }
 
+    Reset-SmokeState
     Invoke-Step 'Running sample smoke script' {
         dotnet $shellDll --state-dir $stateDir --script (Join-Path $repoRoot 'scripts\smoke-sample.rsh')
     }
 
+    Reset-SmokeState
     Invoke-Step 'Running generated-pack smoke script' {
         dotnet $shellDll --state-dir $stateDir --script (Join-Path $repoRoot 'scripts\smoke-generated.rsh')
+    }
+
+    Reset-SmokeState
+    Invoke-Step 'Running repo lifecycle smoke script' {
+        dotnet $shellDll --state-dir $stateDir --script (Join-Path $repoRoot 'scripts\smoke-repo-lifecycle.rsh')
     }
 }
 finally {
