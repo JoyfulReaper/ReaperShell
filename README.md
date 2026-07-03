@@ -122,6 +122,7 @@ Watch mode also executes code after file changes for trusted repos. Only watch r
 - `source <command>` shows or opens the source location for a command.
 - `banner` prints the shell banner again.
 - `status` prints the current shell/runtime status.
+- `doctor` runs a compact environment self-check. Use `doctor --verbose` for paths and command output.
 - `fortune` prints a small shell fortune.
 - `pray` prints a pseudo-ritual response.
 
@@ -147,8 +148,9 @@ The repository includes smoke-test scripts for the sample pack and generated pac
 - [scripts/smoke-repo-lifecycle.rsh](/C:/GitHub/ReaperShell/scripts/smoke-repo-lifecycle.rsh)
 - [scripts/smoke-customization.rsh](/C:/GitHub/ReaperShell/scripts/smoke-customization.rsh)
 - [scripts/smoke-hooks.rsh](/C:/GitHub/ReaperShell/scripts/smoke-hooks.rsh)
+- [scripts/smoke-doctor.rsh](/C:/GitHub/ReaperShell/scripts/smoke-doctor.rsh)
 
-Run all five through the convenience PowerShell harness:
+Run all six through the convenience PowerShell harness:
 
 ```powershell
 ./scripts/run-smoke.ps1

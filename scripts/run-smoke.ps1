@@ -75,6 +75,11 @@ try {
     Invoke-Step 'Running hooks smoke script' {
         dotnet $shellDll --state-dir $stateDir --script (Join-Path $repoRoot 'scripts\smoke-hooks.rsh')
     }
+
+    Reset-SmokeState
+    Invoke-Step 'Running doctor smoke script' {
+        dotnet $shellDll --state-dir $stateDir --script (Join-Path $repoRoot 'scripts\smoke-doctor.rsh')
+    }
 }
 finally {
     Pop-Location

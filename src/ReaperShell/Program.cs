@@ -127,6 +127,14 @@ internal static class Program
         registry.RegisterBuiltIn(new SourceCommand(settings, registry, editorLauncher, workspaceRoot));
         registry.RegisterBuiltIn(new BannerCommand());
         registry.RegisterBuiltIn(new StatusCommand(settings, registry, commandPackManager, watchService, stateDirectory));
+        registry.RegisterBuiltIn(
+            new DoctorCommand(
+                settings,
+                processRunner,
+                registry,
+                commandPackManager,
+                watchService,
+                stateDirectory));
         registry.RegisterBuiltIn(new FortuneCommand());
         registry.RegisterBuiltIn(new PrayCommand());
         registry.RegisterBuiltIn(
