@@ -8,20 +8,26 @@ public sealed class RepoCommand : IShellCommand
 {
     private readonly CommandPackManager _commandPackManager;
     private readonly ProcessRunner _processRunner;
+    private readonly ShellHost _shellHost;
     private readonly string _stateDirectory;
     private readonly ShellSettings _settings;
+    private readonly ShellWatchService _watchService;
     private readonly string _workspaceRoot;
 
     public RepoCommand(
         ShellSettings settings,
         ProcessRunner processRunner,
         CommandPackManager commandPackManager,
+        ShellHost shellHost,
+        ShellWatchService watchService,
         string workspaceRoot,
         string stateDirectory)
     {
         _settings = settings;
         _processRunner = processRunner;
         _commandPackManager = commandPackManager;
+        _shellHost = shellHost;
+        _watchService = watchService;
         _workspaceRoot = workspaceRoot;
         _stateDirectory = stateDirectory;
     }
@@ -55,7 +61,7 @@ public sealed class RepoCommand : IShellCommand
             "sync" => SyncAsync(context, args, cancellationToken),
             "build" => BuildAsync(context, args, cancellationToken),
             "load" => LoadAsync(context, args, cancellationToken),
-            "unload" => UnloadAsync(context, args),
+            "unload" => UnloadAsync(context, args, cancellationToken),
             "reload" => ReloadAsync(context, args, cancellationToken),
             "new" => NewAsync(context, args, cancellationToken),
             "remove" => RemoveAsync(context, args, cancellationToken),
@@ -66,6 +72,9 @@ public sealed class RepoCommand : IShellCommand
             "load-all" => LoadAllAsync(context, args, cancellationToken),
             "reload-all" => ReloadAllAsync(context, args, cancellationToken),
             "autosync" => AutoSyncAsync(context, args, cancellationToken),
+            "watch" => WatchAsync(context, args),
+            "unwatch" => UnwatchAsync(context, args),
+            "watch-list" => WatchListAsync(context, args),
             _ => Task.FromResult(WriteUsage(context))
         };
     }
@@ -209,6 +218,7 @@ public sealed class RepoCommand : IShellCommand
         }
 
         repo.Trusted = false;
+        _watchService.StopWatching(repo.Name, out _);
         await SaveSettingsAsync(cancellationToken);
         context.WriteLine($"Marked '{repo.Name}' as untrusted.");
         return 0;
@@ -284,14 +294,17 @@ public sealed class RepoCommand : IShellCommand
         return await LoadRepoAsync(context, repo, cancellationToken);
     }
 
-    private async Task<int> UnloadAsync(ShellContext context, IReadOnlyList<string> args)
+    private async Task<int> UnloadAsync(
+        ShellContext context,
+        IReadOnlyList<string> args,
+        CancellationToken cancellationToken)
     {
         if (!TryGetRepo(args, "repo unload <name>", context, out var repo))
         {
             return 1;
         }
 
-        return await UnloadRepoIfLoadedAsync(context, repo, writeIfNotLoaded: true);
+        return await UnloadRepoIfLoadedAsync(context, repo, writeIfNotLoaded: true, cancellationToken);
     }
 
     private async Task<int> ReloadAsync(
@@ -415,6 +428,8 @@ public sealed class RepoCommand : IShellCommand
             context.WriteErrorLine($"Failed to unload '{repo.Name}' before removal.");
             return unloadExitCode;
         }
+
+        _watchService.StopWatching(repo.Name, out _);
 
         if (deleteFiles && Directory.Exists(repo.LocalPath))
         {
@@ -598,6 +613,94 @@ public sealed class RepoCommand : IShellCommand
         return 0;
     }
 
+    private Task<int> WatchAsync(ShellContext context, IReadOnlyList<string> args)
+    {
+        if (!_shellHost.IsInteractiveModeEnabled)
+        {
+            context.WriteErrorLine("Watch mode is interactive-only.");
+            return Task.FromResult(1);
+        }
+
+        if (!TryGetRepo(args, "repo watch <name>", context, out var repo))
+        {
+            return Task.FromResult(1);
+        }
+
+        if (!repo.Trusted)
+        {
+            context.WriteErrorLine($"Repo '{repo.Name}' is not trusted.");
+            return Task.FromResult(1);
+        }
+
+        if (!Directory.Exists(repo.LocalPath))
+        {
+            context.WriteErrorLine($"Repo path does not exist: {repo.LocalPath}");
+            return Task.FromResult(1);
+        }
+
+        if (_watchService.TryStartWatching(context, repo.Name, repo.LocalPath, out var message))
+        {
+            context.WriteLine(message);
+            return Task.FromResult(0);
+        }
+
+        context.WriteErrorLine(message);
+        return Task.FromResult(1);
+    }
+
+    private Task<int> UnwatchAsync(ShellContext context, IReadOnlyList<string> args)
+    {
+        if (!_shellHost.IsInteractiveModeEnabled)
+        {
+            context.WriteErrorLine("Watch mode is interactive-only.");
+            return Task.FromResult(1);
+        }
+
+        if (args.Count != 2)
+        {
+            context.WriteErrorLine("Usage: repo unwatch <name>");
+            return Task.FromResult(1);
+        }
+
+        if (_watchService.StopWatching(args[1], out var message))
+        {
+            context.WriteLine(message);
+            return Task.FromResult(0);
+        }
+
+        context.WriteErrorLine(message);
+        return Task.FromResult(1);
+    }
+
+    private Task<int> WatchListAsync(ShellContext context, IReadOnlyList<string> args)
+    {
+        if (!_shellHost.IsInteractiveModeEnabled)
+        {
+            context.WriteErrorLine("Watch mode is interactive-only.");
+            return Task.FromResult(1);
+        }
+
+        if (args.Count != 1)
+        {
+            context.WriteErrorLine("Usage: repo watch-list");
+            return Task.FromResult(1);
+        }
+
+        var watchedRepos = _watchService.GetWatchedRepoNames();
+        if (watchedRepos.Count == 0)
+        {
+            context.WriteLine("No repos are currently being watched.");
+            return Task.FromResult(0);
+        }
+
+        foreach (var watchedRepo in watchedRepos)
+        {
+            context.WriteLine(watchedRepo);
+        }
+
+        return Task.FromResult(0);
+    }
+
     private async Task<int> BuildRepoAsync(
         ShellContext context,
         CommandRepoSettings repo,
@@ -621,7 +724,8 @@ public sealed class RepoCommand : IShellCommand
     private async Task<int> LoadRepoAsync(
         ShellContext context,
         CommandRepoSettings repo,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool triggerLoadedHook)
     {
         if (!repo.Trusted)
         {
@@ -635,7 +739,20 @@ public sealed class RepoCommand : IShellCommand
             context,
             cancellationToken);
 
+        if (result.ExitCode == 0 && triggerLoadedHook)
+        {
+            await _shellHost.RunHookEventAsync(context, ShellHookEventNames.RepoLoaded, cancellationToken);
+        }
+
         return result.ExitCode;
+    }
+
+    private async Task<int> LoadRepoAsync(
+        ShellContext context,
+        CommandRepoSettings repo,
+        CancellationToken cancellationToken)
+    {
+        return await LoadRepoAsync(context, repo, cancellationToken, triggerLoadedHook: true);
     }
 
     private async Task<int> ReloadRepoAsync(
@@ -646,13 +763,20 @@ public sealed class RepoCommand : IShellCommand
         if (!repo.Trusted)
         {
             context.WriteErrorLine($"Repo '{repo.Name}' is not trusted.");
+            await _shellHost.RunHookEventAsync(context, ShellHookEventNames.RepoReloadFailed, cancellationToken);
             return 1;
         }
 
-        var unloadExitCode = await UnloadRepoIfLoadedAsync(context, repo, writeIfNotLoaded: false);
+        var unloadExitCode = await UnloadRepoIfLoadedAsync(
+            context,
+            repo,
+            writeIfNotLoaded: false,
+            cancellationToken,
+            triggerUnloadedHook: false);
         if (unloadExitCode != 0)
         {
             context.WriteErrorLine($"Reload failed while unloading '{repo.Name}'.");
+            await _shellHost.RunHookEventAsync(context, ShellHookEventNames.RepoReloadFailed, cancellationToken);
             return unloadExitCode;
         }
 
@@ -662,6 +786,7 @@ public sealed class RepoCommand : IShellCommand
             if (syncExitCode != 0)
             {
                 context.WriteErrorLine($"Reload failed while syncing '{repo.Name}'.");
+                await _shellHost.RunHookEventAsync(context, ShellHookEventNames.RepoReloadFailed, cancellationToken);
                 return syncExitCode;
             }
         }
@@ -670,18 +795,25 @@ public sealed class RepoCommand : IShellCommand
         if (buildExitCode != 0)
         {
             context.WriteErrorLine($"Reload failed while building '{repo.Name}'.");
+            await _shellHost.RunHookEventAsync(context, ShellHookEventNames.RepoReloadFailed, cancellationToken);
             return buildExitCode;
         }
 
-        var loadExitCode = await LoadRepoAsync(context, repo, cancellationToken);
+        var loadExitCode = await LoadRepoAsync(
+            context,
+            repo,
+            cancellationToken,
+            triggerLoadedHook: false);
         if (loadExitCode != 0)
         {
             context.WriteErrorLine($"Reload failed while loading '{repo.Name}'.");
+            await _shellHost.RunHookEventAsync(context, ShellHookEventNames.RepoReloadFailed, cancellationToken);
             return loadExitCode;
         }
 
         if (!repo.IsGitRepo || !repo.AutoSyncOnSuccessfulReload)
         {
+            await _shellHost.RunHookEventAsync(context, ShellHookEventNames.RepoReloaded, cancellationToken);
             return 0;
         }
 
@@ -695,6 +827,15 @@ public sealed class RepoCommand : IShellCommand
         if (saveExitCode != 0)
         {
             context.WriteErrorLine($"Reload succeeded but auto-sync failed for '{repo.Name}'.");
+        }
+
+        if (saveExitCode == 0)
+        {
+            await _shellHost.RunHookEventAsync(context, ShellHookEventNames.RepoReloaded, cancellationToken);
+        }
+        else
+        {
+            await _shellHost.RunHookEventAsync(context, ShellHookEventNames.RepoReloadFailed, cancellationToken);
         }
 
         return saveExitCode;
@@ -872,7 +1013,9 @@ public sealed class RepoCommand : IShellCommand
     private async Task<int> UnloadRepoIfLoadedAsync(
         ShellContext context,
         CommandRepoSettings repo,
-        bool writeIfNotLoaded)
+        bool writeIfNotLoaded,
+        CancellationToken cancellationToken = default,
+        bool triggerUnloadedHook = true)
     {
         if (!_commandPackManager.IsLoaded(repo.Name))
         {
@@ -886,6 +1029,11 @@ public sealed class RepoCommand : IShellCommand
 
         context.WriteLine($"Repo '{repo.Name}' is loaded. Unloading it first.");
         var result = await _commandPackManager.UnloadAsync(repo.Name, context);
+        if (result.ExitCode == 0 && triggerUnloadedHook)
+        {
+            await _shellHost.RunHookEventAsync(context, ShellHookEventNames.RepoUnloaded, cancellationToken);
+        }
+
         return result.ExitCode;
     }
 
@@ -920,7 +1068,7 @@ public sealed class RepoCommand : IShellCommand
     private static int WriteUsage(ShellContext context)
     {
         context.WriteErrorLine(
-            "Usage: repo <add|list|trust|untrust|status|sync|build|load|unload|reload|new|remove|commit|push|save|build-all|load-all|reload-all|autosync> ...");
+            "Usage: repo <add|list|trust|untrust|status|sync|build|load|unload|reload|new|remove|commit|push|save|build-all|load-all|reload-all|autosync|watch|unwatch|watch-list> ...");
         return 1;
     }
 

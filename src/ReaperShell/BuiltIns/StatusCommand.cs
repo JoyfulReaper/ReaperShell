@@ -10,16 +10,19 @@ public sealed class StatusCommand : IShellCommand
     private readonly CommandRegistry _commandRegistry;
     private readonly ShellSettings _settings;
     private readonly string _stateDirectory;
+    private readonly ShellWatchService _watchService;
 
     public StatusCommand(
         ShellSettings settings,
         CommandRegistry commandRegistry,
         CommandPackManager commandPackManager,
+        ShellWatchService watchService,
         string stateDirectory)
     {
         _settings = settings;
         _commandRegistry = commandRegistry;
         _commandPackManager = commandPackManager;
+        _watchService = watchService;
         _stateDirectory = stateDirectory;
     }
 
@@ -39,6 +42,8 @@ public sealed class StatusCommand : IShellCommand
         context.WriteLine($"LOADED PACKS: {_commandPackManager.LoadedPacks.Count}");
         context.WriteLine($"REGISTERED COMMANDS: {_commandRegistry.GetCommandCount()}");
         context.WriteLine($"ALIASES: {_settings.Aliases.Count}");
+        context.WriteLine($"WATCHED REPOS: {_watchService.WatchedRepoCount}");
+        context.WriteLine($"CONFIGURED HOOKS: {_settings.Hooks.Values.Sum(rituals => rituals?.Count ?? 0)}");
         return Task.FromResult(0);
     }
 }

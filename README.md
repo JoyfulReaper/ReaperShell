@@ -92,8 +92,12 @@ ReaperShell supports a focused set of repo lifecycle and Git-backed workflows:
 - `repo load-all` loads all trusted repos that are not already loaded.
 - `repo reload-all` reloads all trusted repos and prints a compact summary.
 - `repo autosync <name> on|off` controls whether a successful `repo reload <name>` should automatically commit and push Git-backed changes.
+- `repo watch <name>` starts watching a trusted repo in interactive mode and auto-runs `repo reload <name>` after `.cs`, `.csproj`, or `shellpack.json` changes.
+- `repo unwatch <name>` stops watching one repo.
+- `repo watch-list` shows the repos currently being watched.
 
 Auto-sync only applies to trusted repos because loaded command packs execute code on your machine.
+Watch mode also executes code after file changes for trusted repos. Only watch repos you control.
 
 ## Customization Commands
 
@@ -107,6 +111,11 @@ Auto-sync only applies to trusted repos because loaded command packs execute cod
 - `ritual new <name>` creates a starter ritual file.
 - `ritual run <name>` runs a ritual script.
 - `ritual run <name> --continue-on-error` keeps running that ritual after a failure.
+- `hook events` lists the available shell hook events.
+- `hook list` shows configured hooks.
+- `hook add <event> <ritual-name>` appends a ritual to one hook event.
+- `hook remove <event> <ritual-name>` removes one ritual from one hook event.
+- `hook clear <event>` removes all rituals from one hook event.
 - `which <command>` shows whether a command comes from a built-in, alias, or plugin pack.
 - `describe <command>` prints command name, description, and origin details.
 - `edit <path>` opens a file or directory with the configured editor.
@@ -115,6 +124,12 @@ Auto-sync only applies to trusted repos because loaded command packs execute cod
 - `status` prints the current shell/runtime status.
 - `fortune` prints a small shell fortune.
 - `pray` prints a pseudo-ritual response.
+
+Interactive startup also creates a starter ritual at `<state-dir>/rituals/awaken.rsh`. Edit it, then enable it on boot with:
+
+```text
+hook add startup awaken
+```
 
 Editor resolution uses:
 
@@ -131,8 +146,9 @@ The repository includes smoke-test scripts for the sample pack and generated pac
 - [scripts/smoke-generated.rsh](/C:/GitHub/ReaperShell/scripts/smoke-generated.rsh)
 - [scripts/smoke-repo-lifecycle.rsh](/C:/GitHub/ReaperShell/scripts/smoke-repo-lifecycle.rsh)
 - [scripts/smoke-customization.rsh](/C:/GitHub/ReaperShell/scripts/smoke-customization.rsh)
+- [scripts/smoke-hooks.rsh](/C:/GitHub/ReaperShell/scripts/smoke-hooks.rsh)
 
-Run all four through the convenience PowerShell harness:
+Run all five through the convenience PowerShell harness:
 
 ```powershell
 ./scripts/run-smoke.ps1

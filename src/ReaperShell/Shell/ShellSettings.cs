@@ -18,6 +18,9 @@ public sealed class ShellSettings
     public Dictionary<string, string> Aliases { get; set; } =
         new(StringComparer.OrdinalIgnoreCase);
 
+    public Dictionary<string, List<string>> Hooks { get; set; } =
+        new(StringComparer.OrdinalIgnoreCase);
+
     public string DefaultConfiguration { get; set; } = "Debug";
 
     public string? EditorCommand { get; set; }

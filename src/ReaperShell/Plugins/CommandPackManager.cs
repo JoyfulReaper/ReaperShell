@@ -50,6 +50,12 @@ public sealed class CommandPackManager
             {
                 context.WriteLine($"Building {projectPath}...");
 
+                var existingAssemblyPath = FindBuiltAssembly(projectPath, configuration);
+                if (!string.IsNullOrWhiteSpace(existingAssemblyPath))
+                {
+                    await WaitForAssemblyUnlockAsync(existingAssemblyPath, context, cancellationToken);
+                }
+
                 var restoreResult = await _processRunner.RunAsync(
                     "dotnet",
                     ["restore", projectPath, "--configfile", nuGetConfigPath, "--ignore-failed-sources"],
@@ -327,14 +333,71 @@ public sealed class CommandPackManager
         // Collectible unload is only requested here. If plugin code still has
         // static state, background work, or other rooted references, collection
         // can legitimately stay pending after these GC passes.
-        for (var attempt = 0; attempt < 3 && weakReference.IsAlive; attempt++)
+        for (var attempt = 0; attempt < 10 && weakReference.IsAlive; attempt++)
         {
             GC.Collect();
             GC.WaitForPendingFinalizers();
             GC.Collect();
+
+            if (weakReference.IsAlive)
+            {
+                Thread.Sleep(100);
+            }
         }
 
         return !weakReference.IsAlive;
+    }
+
+    private static async Task WaitForAssemblyUnlockAsync(
+        string assemblyPath,
+        ShellContext context,
+        CancellationToken cancellationToken)
+    {
+        if (!File.Exists(assemblyPath))
+        {
+            return;
+        }
+
+        var wroteWaitMessage = false;
+        for (var attempt = 0; attempt < 20; attempt++)
+        {
+            if (CanOpenExclusively(assemblyPath))
+            {
+                return;
+            }
+
+            if (!wroteWaitMessage)
+            {
+                context.WriteLine($"Waiting for previous plugin assembly to unlock: {assemblyPath}");
+                wroteWaitMessage = true;
+            }
+
+            GC.Collect();
+            GC.WaitForPendingFinalizers();
+            GC.Collect();
+            await Task.Delay(250, cancellationToken);
+        }
+    }
+
+    private static bool CanOpenExclusively(string assemblyPath)
+    {
+        try
+        {
+            using var stream = new FileStream(
+                assemblyPath,
+                FileMode.Open,
+                FileAccess.ReadWrite,
+                FileShare.None);
+            return true;
+        }
+        catch (IOException)
+        {
+            return false;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return false;
+        }
     }
 
     private static IEnumerable<IShellCommand> InstantiateCommands(Assembly assembly, ShellContext context)

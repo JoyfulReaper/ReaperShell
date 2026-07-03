@@ -1,3 +1,4 @@
+using System.Threading.Channels;
 using ReaperShell.Abstractions;
 
 namespace ReaperShell.Shell;
@@ -8,46 +9,87 @@ public sealed class ShellHost
 
     private readonly CommandParser _commandParser;
     private readonly CommandRegistry _commandRegistry;
+    private readonly AsyncLocal<int> _commandExecutionDepth = new();
+    private readonly SemaphoreSlim _commandExecutionLock = new(1, 1);
+    private readonly Channel<InteractiveWorkItem> _interactiveWorkItems = Channel.CreateUnbounded<InteractiveWorkItem>();
+    private readonly object _hookGate = new();
     private readonly ShellLifetime _lifetime;
+    private readonly HashSet<string> _activeHookEvents = new(StringComparer.OrdinalIgnoreCase);
+    private readonly string _stateDirectory;
     private readonly ShellSettings _settings;
 
     public ShellHost(
         CommandParser commandParser,
         CommandRegistry commandRegistry,
         ShellLifetime lifetime,
-        ShellSettings settings)
+        ShellSettings settings,
+        string stateDirectory)
     {
         _commandParser = commandParser;
         _commandRegistry = commandRegistry;
         _lifetime = lifetime;
         _settings = settings;
+        _stateDirectory = stateDirectory;
     }
+
+    public bool IsInteractiveModeEnabled { get; private set; }
 
     public async Task<int> RunInteractiveAsync(
         ShellContext context,
         string? profilePath,
         CancellationToken cancellationToken)
     {
-        ShellBanner.Write(context);
+        IsInteractiveModeEnabled = true;
+        _ = Task.Run(() => ReadInteractiveInputAsync(_interactiveWorkItems.Writer), CancellationToken.None);
 
-        if (!string.IsNullOrWhiteSpace(profilePath))
+        try
         {
-            await RunProfileAsync(context, profilePath, cancellationToken);
-        }
+            ShellBanner.Write(context);
 
-        while (!_lifetime.ExitRequested && !cancellationToken.IsCancellationRequested)
-        {
-            Console.Write("rsh> ");
-            var input = Console.ReadLine();
-            if (input is null)
+            if (!string.IsNullOrWhiteSpace(profilePath))
             {
-                break;
+                await RunProfileAsync(context, profilePath, cancellationToken);
             }
 
-            await ExecuteCommandAsync(context, input, echoCommand: false, cancellationToken);
-        }
+            await RunHookEventAsync(context, ShellHookEventNames.Startup, cancellationToken);
 
-        return 0;
+            while (!_lifetime.ExitRequested && !cancellationToken.IsCancellationRequested)
+            {
+                Console.Write("rsh> ");
+                var workItem = await _interactiveWorkItems.Reader.ReadAsync(cancellationToken);
+
+                if (workItem.QueuedCommand is not null)
+                {
+                    var queuedCommand = workItem.QueuedCommand;
+                    var exitCode = await ExecuteCommandAsync(
+                        queuedCommand.Context,
+                        queuedCommand.CommandText,
+                        new CommandExecutionOptions(EchoCommand: queuedCommand.EchoCommand, TriggerCommandHooks: false),
+                        queuedCommand.CancellationToken);
+                    queuedCommand.Completion.TrySetResult(exitCode);
+                    continue;
+                }
+
+                var input = workItem.UserInput;
+                if (input is null)
+                {
+                    break;
+                }
+
+                await ExecuteCommandAsync(
+                    context,
+                    input,
+                    new CommandExecutionOptions(EchoCommand: false, TriggerCommandHooks: true),
+                    cancellationToken);
+            }
+
+            await RunHookEventAsync(context, ShellHookEventNames.ShellExit, cancellationToken);
+            return 0;
+        }
+        finally
+        {
+            IsInteractiveModeEnabled = false;
+        }
     }
 
     public async Task<int> RunScriptAsync(
@@ -61,7 +103,7 @@ public sealed class ShellHost
             context,
             scriptPath,
             continueOnError,
-            echoCommand: true,
+            new CommandExecutionOptions(EchoCommand: true, TriggerCommandHooks: true),
             cancellationToken);
     }
 
@@ -71,7 +113,11 @@ public sealed class ShellHost
         CancellationToken cancellationToken)
     {
         ShellBanner.Write(context);
-        return await ExecuteCommandAsync(context, commandText, echoCommand: false, cancellationToken);
+        return await ExecuteCommandAsync(
+            context,
+            commandText,
+            new CommandExecutionOptions(EchoCommand: false, TriggerCommandHooks: true),
+            cancellationToken);
     }
 
     public async Task<int> RunProfileAsync(
@@ -90,7 +136,7 @@ public sealed class ShellHost
             context,
             profilePath,
             continueOnError: true,
-            echoCommand: true,
+            new CommandExecutionOptions(EchoCommand: true, TriggerCommandHooks: false),
             cancellationToken);
     }
 
@@ -104,51 +150,176 @@ public sealed class ShellHost
             context,
             ritualPath,
             continueOnError,
-            echoCommand: true,
+            new CommandExecutionOptions(EchoCommand: true, TriggerCommandHooks: false),
             cancellationToken);
+    }
+
+    public async Task<int> RunAutomationCommandAsync(
+        ShellContext context,
+        string commandText,
+        bool echoCommand,
+        CancellationToken cancellationToken)
+    {
+        return await ExecuteCommandAsync(
+            context,
+            commandText,
+            new CommandExecutionOptions(EchoCommand: echoCommand, TriggerCommandHooks: false),
+            cancellationToken);
+    }
+
+    public Task<int> QueueInteractiveCommandAsync(
+        ShellContext context,
+        string commandText,
+        bool echoCommand,
+        CancellationToken cancellationToken)
+    {
+        if (!IsInteractiveModeEnabled)
+        {
+            return RunAutomationCommandAsync(context, commandText, echoCommand, cancellationToken);
+        }
+
+        var queuedCommand = new QueuedInteractiveCommand(
+            context,
+            commandText,
+            echoCommand,
+            cancellationToken,
+            new TaskCompletionSource<int>(TaskCreationOptions.RunContinuationsAsynchronously));
+
+        if (!_interactiveWorkItems.Writer.TryWrite(new InteractiveWorkItem(null, queuedCommand)))
+        {
+            queuedCommand.Completion.TrySetResult(1);
+        }
+
+        return queuedCommand.Completion.Task;
+    }
+
+    public async Task RunHookEventAsync(
+        ShellContext context,
+        string eventName,
+        CancellationToken cancellationToken)
+    {
+        if (!_settings.Hooks.TryGetValue(eventName, out var rituals) || rituals.Count == 0)
+        {
+            return;
+        }
+
+        lock (_hookGate)
+        {
+            if (!_activeHookEvents.Add(eventName))
+            {
+                return;
+            }
+        }
+
+        try
+        {
+            foreach (var ritualName in rituals.ToArray())
+            {
+                var ritualPath = Path.Combine(_stateDirectory, "rituals", ritualName + ".rsh");
+                if (!File.Exists(ritualPath))
+                {
+                    context.WriteErrorLine($"Hook ritual '{ritualName}' for event '{eventName}' does not exist.");
+                    continue;
+                }
+
+                var exitCode = await ExecuteScriptFileAsync(
+                    context,
+                    ritualPath,
+                    continueOnError: true,
+                    new CommandExecutionOptions(EchoCommand: false, TriggerCommandHooks: false),
+                    cancellationToken);
+
+                if (exitCode != 0)
+                {
+                    context.WriteErrorLine(
+                        $"Hook ritual '{ritualName}' for event '{eventName}' completed with errors.");
+                }
+            }
+        }
+        finally
+        {
+            lock (_hookGate)
+            {
+                _activeHookEvents.Remove(eventName);
+            }
+        }
     }
 
     private async Task<int> ExecuteCommandAsync(
         ShellContext context,
         string input,
-        bool echoCommand,
+        CommandExecutionOptions options,
         CancellationToken cancellationToken)
     {
-        if (echoCommand)
+        var ownsExecutionLock = false;
+        if (_commandExecutionDepth.Value == 0)
         {
-            context.WriteLine($"rsh> {input}");
+            await _commandExecutionLock.WaitAsync(cancellationToken);
+            ownsExecutionLock = true;
         }
 
-        var tokens = _commandParser.Parse(input);
-        if (tokens.Count == 0)
-        {
-            return 0;
-        }
-
-        if (!TryResolveCommandTokens(tokens, echoCommand, context, out var resolvedTokens))
-        {
-            return 1;
-        }
-
-        if (!_commandRegistry.TryGet(resolvedTokens[0], out var command))
-        {
-            context.WriteErrorLine($"Unknown command: {resolvedTokens[0]}");
-            return 1;
-        }
+        _commandExecutionDepth.Value++;
 
         try
         {
-            return await command.ExecuteAsync(context, resolvedTokens.Skip(1).ToArray(), cancellationToken);
+            if (options.EchoCommand)
+            {
+                context.WriteLine($"rsh> {input}");
+            }
+
+            var tokens = _commandParser.Parse(input);
+            if (tokens.Count == 0)
+            {
+                return 0;
+            }
+
+            if (!TryResolveCommandTokens(tokens, options.EchoCommand, context, out var resolvedTokens))
+            {
+                return 1;
+            }
+
+            if (options.TriggerCommandHooks)
+            {
+                await RunHookEventAsync(context, ShellHookEventNames.BeforeCommand, cancellationToken);
+            }
+
+            if (!_commandRegistry.TryGet(resolvedTokens[0], out var command))
+            {
+                context.WriteErrorLine($"Unknown command: {resolvedTokens[0]}");
+                return 1;
+            }
+
+            var exitCode = 1;
+            try
+            {
+                exitCode = await command.ExecuteAsync(context, resolvedTokens.Skip(1).ToArray(), cancellationToken);
+                return exitCode;
+            }
+            catch (OperationCanceledException)
+            {
+                context.WriteErrorLine("Command canceled.");
+            }
+            catch (Exception ex)
+            {
+                context.WriteErrorLine($"Command failed: {ex.Message}");
+            }
+            finally
+            {
+                if (options.TriggerCommandHooks)
+                {
+                    await RunHookEventAsync(context, ShellHookEventNames.AfterCommand, cancellationToken);
+                }
+            }
+
+            return exitCode;
         }
-        catch (OperationCanceledException)
+        finally
         {
-            context.WriteErrorLine("Command canceled.");
-            return 1;
-        }
-        catch (Exception ex)
-        {
-            context.WriteErrorLine($"Command failed: {ex.Message}");
-            return 1;
+            _commandExecutionDepth.Value--;
+            if (ownsExecutionLock)
+            {
+                _commandExecutionLock.Release();
+            }
         }
     }
 
@@ -156,7 +327,7 @@ public sealed class ShellHost
         ShellContext context,
         string scriptPath,
         bool continueOnError,
-        bool echoCommand,
+        CommandExecutionOptions options,
         CancellationToken cancellationToken)
     {
         if (!File.Exists(scriptPath))
@@ -177,7 +348,7 @@ public sealed class ShellHost
             var commandExitCode = await ExecuteCommandAsync(
                 context,
                 commandText,
-                echoCommand,
+                options,
                 cancellationToken);
 
             if (commandExitCode != 0)
@@ -235,7 +406,38 @@ public sealed class ShellHost
 
         return true;
     }
+
+    private static async Task ReadInteractiveInputAsync(ChannelWriter<InteractiveWorkItem> writer)
+    {
+        try
+        {
+            while (true)
+            {
+                var input = Console.ReadLine();
+                await writer.WriteAsync(new InteractiveWorkItem(input, null));
+                if (input is null)
+                {
+                    break;
+                }
+            }
+        }
+        finally
+        {
+            writer.TryComplete();
+        }
+    }
 }
+
+public sealed record CommandExecutionOptions(bool EchoCommand, bool TriggerCommandHooks);
+
+internal sealed record QueuedInteractiveCommand(
+    ShellContext Context,
+    string CommandText,
+    bool EchoCommand,
+    CancellationToken CancellationToken,
+    TaskCompletionSource<int> Completion);
+
+internal sealed record InteractiveWorkItem(string? UserInput, QueuedInteractiveCommand? QueuedCommand);
 
 public sealed class ShellLifetime
 {

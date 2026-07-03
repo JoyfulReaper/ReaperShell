@@ -33,7 +33,8 @@ internal static class Program
         var processRunner = new ProcessRunner();
         var commandPackManager = new CommandPackManager(registry, processRunner);
         var lifetime = new ShellLifetime();
-        var host = new ShellHost(parser, registry, lifetime, settings);
+        var host = new ShellHost(parser, registry, lifetime, settings, stateDirectory);
+        var watchService = new ShellWatchService(host);
         var editorLauncher = new EditorLauncher(settings, processRunner);
 
         RegisterBuiltIns(
@@ -43,6 +44,7 @@ internal static class Program
             commandPackManager,
             lifetime,
             host,
+            watchService,
             editorLauncher,
             workspaceRoot,
             stateDirectory);
@@ -55,6 +57,7 @@ internal static class Program
             cancellationToken: CancellationToken.None);
 
         var defaultProfilePath = Path.Combine(stateDirectory, "profile.rsh");
+        await EnsureDefaultProfileExistsAsync(defaultProfilePath);
         var shouldRunProfile =
             !options.NoProfile &&
             (options.ProfilePath is not null || options.ScriptPath is null && options.CommandText is null);
@@ -89,7 +92,6 @@ internal static class Program
             return await host.RunCommandAsync(context, options.CommandText, CancellationToken.None);
         }
 
-        await EnsureDefaultProfileExistsAsync(defaultProfilePath);
         return await host.RunInteractiveAsync(
             context,
             shouldRunProfile ? profilePath : null,
@@ -103,6 +105,7 @@ internal static class Program
         CommandPackManager commandPackManager,
         ShellLifetime lifetime,
         ShellHost host,
+        ShellWatchService watchService,
         EditorLauncher editorLauncher,
         string workspaceRoot,
         string stateDirectory)
@@ -117,12 +120,13 @@ internal static class Program
         registry.RegisterBuiltIn(new CatCommand());
         registry.RegisterBuiltIn(new AliasCommand(settings, registry, stateDirectory));
         registry.RegisterBuiltIn(new RitualCommand(host, stateDirectory));
+        registry.RegisterBuiltIn(new HookCommand(settings, stateDirectory));
         registry.RegisterBuiltIn(new WhichCommand(settings, registry));
         registry.RegisterBuiltIn(new DescribeCommand(settings, registry));
         registry.RegisterBuiltIn(new EditCommand(editorLauncher));
         registry.RegisterBuiltIn(new SourceCommand(settings, registry, editorLauncher, workspaceRoot));
         registry.RegisterBuiltIn(new BannerCommand());
-        registry.RegisterBuiltIn(new StatusCommand(settings, registry, commandPackManager, stateDirectory));
+        registry.RegisterBuiltIn(new StatusCommand(settings, registry, commandPackManager, watchService, stateDirectory));
         registry.RegisterBuiltIn(new FortuneCommand());
         registry.RegisterBuiltIn(new PrayCommand());
         registry.RegisterBuiltIn(
@@ -130,6 +134,8 @@ internal static class Program
                 settings,
                 processRunner,
                 commandPackManager,
+                host,
+                watchService,
                 workspaceRoot,
                 stateDirectory));
         registry.RegisterBuiltIn(new PluginsCommand(commandPackManager));
@@ -156,20 +162,37 @@ internal static class Program
             Directory.CreateDirectory(profileDirectory);
         }
 
-        if (File.Exists(profilePath))
+        if (!File.Exists(profilePath))
         {
-            return;
-        }
-
-        await File.WriteAllTextAsync(
-            profilePath,
-            """
+            await File.WriteAllTextAsync(
+                profilePath,
+                """
 # ReaperShell startup profile
 # Commands here run when the interactive shell starts.
 # Example:
 # repo list
 # plugins
 """);
+        }
+
+        var stateDirectory = profileDirectory!;
+        var ritualsDirectory = Path.Combine(stateDirectory, "rituals");
+        Directory.CreateDirectory(ritualsDirectory);
+
+        var awakenPath = Path.Combine(ritualsDirectory, "awaken.rsh");
+        if (!File.Exists(awakenPath))
+        {
+            await File.WriteAllTextAsync(
+                awakenPath,
+                """
+# Ritual: awaken
+# Add this to startup with:
+# hook add startup awaken
+banner
+status
+pray
+""");
+        }
     }
 
     private static async Task<bool> TryRunProfileAsync(
