@@ -323,6 +323,13 @@ public sealed class {{className}} : IShellCommand
         IReadOnlyList<string> args,
         CancellationToken cancellationToken = default)
     {
+        if (args.Count != 0)
+        {
+            context.WriteErrorLine("Usage: {{commandName}}");
+            return Task.FromResult(1);
+        }
+
+        // Replace this stub with your command's real behavior.
         context.WriteLine("{{commandName}} command is alive.");
         return Task.FromResult(0);
     }
@@ -355,15 +362,38 @@ public sealed class {{className}} : IShellCommand
         }
 
         var filePath = Path.GetFullPath(args[0], context.WorkingDirectory.FullName);
-        if (!File.Exists(filePath))
+        try
         {
-            context.WriteErrorLine($"File not found: {filePath}");
+            if (!File.Exists(filePath))
+            {
+                context.WriteErrorLine($"File not found: {filePath}");
+                return 1;
+            }
+
+            var contents = await File.ReadAllTextAsync(filePath, cancellationToken);
+            context.WriteLine(contents);
+            return 0;
+        }
+        catch (OperationCanceledException)
+        {
+            context.WriteErrorLine("File read canceled.");
             return 1;
         }
-
-        var contents = await File.ReadAllTextAsync(filePath, cancellationToken);
-        context.WriteLine(contents);
-        return 0;
+        catch (IOException ex)
+        {
+            context.WriteErrorLine($"Failed to read file: {ex.Message}");
+            return 1;
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            context.WriteErrorLine($"Failed to read file: {ex.Message}");
+            return 1;
+        }
+        catch (ArgumentException ex)
+        {
+            context.WriteErrorLine($"Invalid file path: {ex.Message}");
+            return 1;
+        }
     }
 }
 """;
@@ -442,8 +472,23 @@ public sealed class {{className}} : IShellCommand
 
         process.BeginOutputReadLine();
         process.BeginErrorReadLine();
-        await process.WaitForExitAsync(cancellationToken);
-        return process.ExitCode;
+
+        try
+        {
+            await process.WaitForExitAsync(cancellationToken);
+            return process.ExitCode;
+        }
+        catch (OperationCanceledException)
+        {
+            if (!process.HasExited)
+            {
+                process.Kill(entireProcessTree: true);
+                await process.WaitForExitAsync(CancellationToken.None);
+            }
+
+            context.WriteErrorLine("Process execution canceled.");
+            return 1;
+        }
     }
 }
 """;
