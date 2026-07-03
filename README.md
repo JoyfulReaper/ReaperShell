@@ -154,13 +154,13 @@ Editor resolution uses:
 
 The repository includes smoke-test scripts for the sample pack and generated packs:
 
-- [scripts/smoke-sample.rsh](/C:/GitHub/ReaperShell/scripts/smoke-sample.rsh)
-- [scripts/smoke-generated.rsh](/C:/GitHub/ReaperShell/scripts/smoke-generated.rsh)
-- [scripts/smoke-repo-lifecycle.rsh](/C:/GitHub/ReaperShell/scripts/smoke-repo-lifecycle.rsh)
-- [scripts/smoke-customization.rsh](/C:/GitHub/ReaperShell/scripts/smoke-customization.rsh)
-- [scripts/smoke-hooks.rsh](/C:/GitHub/ReaperShell/scripts/smoke-hooks.rsh)
-- [scripts/smoke-doctor.rsh](/C:/GitHub/ReaperShell/scripts/smoke-doctor.rsh)
-- [scripts/smoke-command-forge.rsh](/C:/GitHub/ReaperShell/scripts/smoke-command-forge.rsh)
+- scripts/smoke-sample.rsh
+- scripts/smoke-generated.rsh
+- scripts/smoke-repo-lifecycle.rsh
+- scripts/smoke-customization.rsh
+- scripts/smoke-hooks.rsh
+- scripts/smoke-doctor.rsh
+- scripts/smoke-command-forge.rsh
 
 Run all seven through the convenience PowerShell harness:
 
