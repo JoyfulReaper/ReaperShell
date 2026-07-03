@@ -45,7 +45,7 @@ public sealed class ShellSettings
             JsonOptions,
             cancellationToken);
 
-        return settingsFromDisk ?? new ShellSettings();
+        return settingsFromDisk?.Normalize() ?? new ShellSettings();
     }
 
     public async Task SaveAsync(string stateDirectory, CancellationToken cancellationToken)
@@ -60,6 +60,43 @@ public sealed class ShellSettings
     public static string GetSettingsPath(string stateDirectory)
     {
         return Path.Combine(stateDirectory, "settings.json");
+    }
+
+    public ShellSettings Normalize()
+    {
+        Repos = Repos is null
+            ? new Dictionary<string, CommandRepoSettings>(StringComparer.OrdinalIgnoreCase)
+            : new Dictionary<string, CommandRepoSettings>(
+                Repos
+                    .Where(pair => pair.Key is not null && pair.Value is not null)
+                    .Select(pair =>
+                    {
+                        pair.Value.Name = string.IsNullOrWhiteSpace(pair.Value.Name) ? pair.Key : pair.Value.Name;
+                        pair.Value.Source ??= string.Empty;
+                        pair.Value.LocalPath ??= string.Empty;
+                        return pair;
+                    }),
+                StringComparer.OrdinalIgnoreCase);
+
+        Aliases = Aliases is null
+            ? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            : new Dictionary<string, string>(
+                Aliases
+                    .Where(pair => pair.Key is not null)
+                    .Select(pair => new KeyValuePair<string, string>(pair.Key, pair.Value ?? string.Empty)),
+                StringComparer.OrdinalIgnoreCase);
+
+        Hooks = Hooks is null
+            ? new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase)
+            : new Dictionary<string, List<string>>(
+                Hooks
+                    .Where(pair => pair.Key is not null)
+                    .Select(pair => new KeyValuePair<string, List<string>>(
+                        pair.Key,
+                        pair.Value?.Where(ritual => !string.IsNullOrWhiteSpace(ritual)).ToList() ?? [])),
+                StringComparer.OrdinalIgnoreCase);
+
+        return this;
     }
 }
 

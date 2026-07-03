@@ -2,6 +2,9 @@ namespace ReaperShell.Plugins;
 
 public static class CommandPackPathResolver
 {
+    public static StringComparison PathComparison =>
+        OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+
     public static string EnsurePathWithinRoot(
         string rootPath,
         string candidatePath,
@@ -32,18 +35,27 @@ public static class CommandPackPathResolver
         return EnsurePathWithinRoot(repoRoot, combinedPath, "shellpack.json commandsPath");
     }
 
-    private static bool IsPathWithinRoot(string rootPath, string candidatePath)
+    public static bool IsPathWithinRoot(
+        string rootPath,
+        string candidatePath,
+        bool allowExactMatch = true)
     {
         var normalizedRootPath = AppendDirectorySeparator(Path.GetFullPath(rootPath));
         var normalizedCandidatePath = Path.GetFullPath(candidatePath);
+        var rootWithoutSeparator = normalizedRootPath.TrimEnd(Path.DirectorySeparatorChar);
 
-        return string.Equals(
-                   normalizedCandidatePath,
-                   normalizedRootPath.TrimEnd(Path.DirectorySeparatorChar),
-                   StringComparison.OrdinalIgnoreCase) ||
-               normalizedCandidatePath.StartsWith(
-                   normalizedRootPath,
-                   StringComparison.OrdinalIgnoreCase);
+        if (allowExactMatch &&
+            string.Equals(
+                normalizedCandidatePath,
+                rootWithoutSeparator,
+                PathComparison))
+        {
+            return true;
+        }
+
+        return normalizedCandidatePath.StartsWith(
+            normalizedRootPath,
+            PathComparison);
     }
 
     private static string AppendDirectorySeparator(string path)

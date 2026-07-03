@@ -92,6 +92,11 @@ public sealed class RepoCommand : IShellCommand
 
         var name = args[1];
         var source = args[2];
+        if (!TryValidateRepoName(name, context))
+        {
+            return 1;
+        }
+
         if (_settings.Repos.ContainsKey(name))
         {
             context.WriteErrorLine($"Repo '{name}' is already registered.");
@@ -332,6 +337,11 @@ public sealed class RepoCommand : IShellCommand
         }
 
         var name = args[1];
+        if (!TryValidateRepoName(name, context))
+        {
+            return 1;
+        }
+
         if (_settings.Repos.ContainsKey(name))
         {
             context.WriteErrorLine($"Repo '{name}' is already registered.");
@@ -1079,9 +1089,7 @@ public sealed class RepoCommand : IShellCommand
 
     private bool IsManagedRepoPath(string path)
     {
-        var fullStateDirectory = AppendDirectorySeparator(Path.GetFullPath(_stateDirectory));
-        var fullRepoPath = Path.GetFullPath(path);
-        return fullRepoPath.StartsWith(fullStateDirectory, StringComparison.OrdinalIgnoreCase);
+        return CommandPackPathResolver.IsPathWithinRoot(_stateDirectory, path, allowExactMatch: false);
     }
 
     private static string AppendDirectorySeparator(string path)
@@ -1112,6 +1120,18 @@ public sealed class RepoCommand : IShellCommand
 
         return source.Contains("git@", StringComparison.OrdinalIgnoreCase) ||
                source.EndsWith(".git", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool TryValidateRepoName(string name, ShellContext context)
+    {
+        if (!ShellNameValidator.IsLowerKebabCaseName(name))
+        {
+            context.WriteErrorLine(
+                "Repo names must start with a lowercase letter and use lowercase kebab-case.");
+            return false;
+        }
+
+        return true;
     }
 
     private bool TryGetRepo(

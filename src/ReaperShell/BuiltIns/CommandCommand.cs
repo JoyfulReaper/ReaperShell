@@ -239,23 +239,9 @@ public sealed class CommandCommand : IShellCommand
         out string commandName)
     {
         commandName = candidate;
-        if (string.IsNullOrWhiteSpace(candidate) ||
-            candidate.Any(char.IsWhiteSpace) ||
-            candidate.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0 ||
-            candidate.Contains(Path.DirectorySeparatorChar) ||
-            candidate.Contains(Path.AltDirectorySeparatorChar))
+        if (!ShellNameValidator.IsLowerKebabCaseName(candidate))
         {
-            context.WriteErrorLine("Command names must be simple lowercase kebab-case names.");
-            return false;
-        }
-
-        if (candidate.Any(char.IsUpper) ||
-            !candidate.All(character => char.IsLower(character) || char.IsDigit(character) || character == '-') ||
-            candidate.StartsWith('-') ||
-            candidate.EndsWith('-') ||
-            candidate.Contains("--", StringComparison.Ordinal))
-        {
-            context.WriteErrorLine("Command names must be lowercase kebab-case.");
+            context.WriteErrorLine("Command names must start with a lowercase letter and use lowercase kebab-case.");
             return false;
         }
 

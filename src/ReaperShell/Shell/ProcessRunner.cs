@@ -97,7 +97,21 @@ public sealed class ProcessRunner
 
         process.BeginOutputReadLine();
         process.BeginErrorReadLine();
-        await process.WaitForExitAsync(cancellationToken);
+
+        try
+        {
+            await process.WaitForExitAsync(cancellationToken);
+        }
+        catch (OperationCanceledException)
+        {
+            if (!process.HasExited)
+            {
+                process.Kill(entireProcessTree: true);
+                await process.WaitForExitAsync(CancellationToken.None);
+            }
+
+            throw;
+        }
 
         return new ProcessRunResult(
             process.ExitCode,
