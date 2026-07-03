@@ -228,6 +228,7 @@ public sealed class CommandCommand : IShellCommand
         }
 
         return Directory.GetFiles(commandsRoot, "*.csproj", SearchOption.AllDirectories)
+            .Select(path => CommandPackPathResolver.EnsurePathWithinRoot(commandsRoot, path, "Command project path"))
             .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
             .ToList();
     }
@@ -269,18 +270,16 @@ public sealed class CommandCommand : IShellCommand
     {
         commandsRoot = string.Empty;
 
-        var fullRepoRoot = AppendDirectorySeparator(Path.GetFullPath(repoRoot));
-        var resolvedCommandsRoot = Path.GetFullPath(
-            Path.Combine(repoRoot, manifest.CommandsPath ?? string.Empty));
-
-        if (!resolvedCommandsRoot.StartsWith(fullRepoRoot, StringComparison.OrdinalIgnoreCase))
+        try
         {
-            context.WriteErrorLine("shellpack.json commandsPath must stay inside the repo directory.");
+            commandsRoot = CommandPackPathResolver.ResolveCommandsRoot(repoRoot, manifest.CommandsPath);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            context.WriteErrorLine(ex.Message);
             return false;
         }
-
-        commandsRoot = resolvedCommandsRoot;
-        return true;
     }
 
     private string GetProjectFileContents(string commandDirectory)
@@ -477,13 +476,6 @@ public sealed class {{className}} : IShellCommand
         }
 
         return builder.ToString();
-    }
-
-    private static string AppendDirectorySeparator(string path)
-    {
-        return path.EndsWith(Path.DirectorySeparatorChar)
-            ? path
-            : path + Path.DirectorySeparatorChar;
     }
 
     private static int WriteUsage(ShellContext context)

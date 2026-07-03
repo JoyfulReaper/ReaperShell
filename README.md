@@ -144,6 +144,10 @@ Editor resolution uses:
 3. `EDITOR`
 4. `code`, if available
 
+## Command Pack Containment
+
+`shellpack.json` `commandsPath` is constrained to the command pack root. ReaperShell refuses to list, create, build, or load command projects outside the pack root even if a manifest points elsewhere.
+
 ## Smoke Tests
 
 The repository includes smoke-test scripts for the sample pack and generated packs:
@@ -161,6 +165,8 @@ Run all seven through the convenience PowerShell harness:
 ```powershell
 ./scripts/run-smoke.ps1
 ```
+
+That harness also runs the negative `scripts/run-security-smoke.ps1` containment checks after the positive smoke scripts.
 
 ## Security Warning
 

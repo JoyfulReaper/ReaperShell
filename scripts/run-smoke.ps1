@@ -85,6 +85,10 @@ try {
     Invoke-Step 'Running command forge smoke script' {
         dotnet $shellDll --state-dir $stateDir --script (Join-Path $repoRoot 'scripts\smoke-command-forge.rsh')
     }
+
+    Invoke-Step 'Running security smoke script' {
+        powershell -ExecutionPolicy Bypass -File (Join-Path $repoRoot 'scripts\run-security-smoke.ps1')
+    }
 }
 finally {
     Pop-Location

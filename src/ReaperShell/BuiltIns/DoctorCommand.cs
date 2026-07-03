@@ -220,6 +220,22 @@ public sealed class DoctorCommand : IShellCommand
             {
                 failures.Add("shellpack.json is missing.");
             }
+            else if (File.Exists(manifestPath))
+            {
+                try
+                {
+                    var manifest = await CommandPackManifest.LoadAsync(manifestPath, cancellationToken);
+                    var commandsRoot = CommandPackPathResolver.ResolveCommandsRoot(repo.LocalPath, manifest.CommandsPath);
+                    if (report.Verbose)
+                    {
+                        details.Add($"Commands root: {commandsRoot}");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    failures.Add($"commandsPath is invalid: {ex.Message}");
+                }
+            }
 
             if (repo.IsGitRepo && Directory.Exists(repo.LocalPath))
             {

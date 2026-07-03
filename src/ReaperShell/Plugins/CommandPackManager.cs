@@ -293,13 +293,14 @@ public sealed class CommandPackManager
 
     private static List<string> DiscoverCommandProjects(CommandRepoSettings repo, CommandPackManifest manifest)
     {
-        var commandsRoot = Path.Combine(repo.LocalPath, manifest.CommandsPath);
+        var commandsRoot = CommandPackPathResolver.ResolveCommandsRoot(repo.LocalPath, manifest.CommandsPath);
         if (!Directory.Exists(commandsRoot))
         {
             return [];
         }
 
         return Directory.GetFiles(commandsRoot, "*.csproj", SearchOption.AllDirectories)
+            .Select(path => CommandPackPathResolver.EnsurePathWithinRoot(commandsRoot, path, "Command project path"))
             .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
             .ToList();
     }
