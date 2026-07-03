@@ -116,6 +116,11 @@ Watch mode also executes code after file changes for trusted repos. Only watch r
 - `hook add <event> <ritual-name>` appends a ritual to one hook event.
 - `hook remove <event> <ritual-name>` removes one ritual from one hook event.
 - `hook clear <event>` removes all rituals from one hook event.
+- `command templates` lists the available command forge templates.
+- `command list <repo>` lists command projects inside an existing command pack.
+- `command new <repo> <name>` creates a new basic command scaffold.
+- `command new <repo> <name> --template file` creates a file-reading command scaffold.
+- `command new <repo> <name> --template process` creates a process-running command scaffold.
 - `which <command>` shows whether a command comes from a built-in, alias, or plugin pack.
 - `describe <command>` prints command name, description, and origin details.
 - `edit <path>` opens a file or directory with the configured editor.
@@ -149,8 +154,9 @@ The repository includes smoke-test scripts for the sample pack and generated pac
 - [scripts/smoke-customization.rsh](/C:/GitHub/ReaperShell/scripts/smoke-customization.rsh)
 - [scripts/smoke-hooks.rsh](/C:/GitHub/ReaperShell/scripts/smoke-hooks.rsh)
 - [scripts/smoke-doctor.rsh](/C:/GitHub/ReaperShell/scripts/smoke-doctor.rsh)
+- [scripts/smoke-command-forge.rsh](/C:/GitHub/ReaperShell/scripts/smoke-command-forge.rsh)
 
-Run all six through the convenience PowerShell harness:
+Run all seven through the convenience PowerShell harness:
 
 ```powershell
 ./scripts/run-smoke.ps1

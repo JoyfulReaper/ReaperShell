@@ -121,6 +121,7 @@ internal static class Program
         registry.RegisterBuiltIn(new AliasCommand(settings, registry, stateDirectory));
         registry.RegisterBuiltIn(new RitualCommand(host, stateDirectory));
         registry.RegisterBuiltIn(new HookCommand(settings, stateDirectory));
+        registry.RegisterBuiltIn(new CommandCommand(settings, workspaceRoot));
         registry.RegisterBuiltIn(new WhichCommand(settings, registry));
         registry.RegisterBuiltIn(new DescribeCommand(settings, registry));
         registry.RegisterBuiltIn(new EditCommand(editorLauncher));

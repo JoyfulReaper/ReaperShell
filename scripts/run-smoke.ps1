@@ -80,6 +80,11 @@ try {
     Invoke-Step 'Running doctor smoke script' {
         dotnet $shellDll --state-dir $stateDir --script (Join-Path $repoRoot 'scripts\smoke-doctor.rsh')
     }
+
+    Reset-SmokeState
+    Invoke-Step 'Running command forge smoke script' {
+        dotnet $shellDll --state-dir $stateDir --script (Join-Path $repoRoot 'scripts\smoke-command-forge.rsh')
+    }
 }
 finally {
     Pop-Location
