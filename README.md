@@ -7,7 +7,7 @@ ReaperShell is a live-extensible programmer shell built as a .NET console app. I
 Most shells are either static tools or full scripting environments. ReaperShell aims for a narrower model:
 
 - built-in commands for navigation, inspection, and shell management
-- command packs as regular C# projects
+- command packs as regular .NET projects in C#, F#, or VB.NET
 - live build, load, unload, and reload during one shell session
 - lightweight local customization through profiles, aliases, rituals, and hooks
 
@@ -92,8 +92,14 @@ Useful execution flags:
 A command pack is a local folder or Git-backed repo containing:
 
 - `shellpack.json` describing the pack
-- one or more command projects under the configured `commandsPath`
+- one or more SDK-style command projects under the configured `commandsPath`
 - assemblies that implement `ReaperShell.Abstractions.IShellCommand`
+
+ReaperShell commands are normal .NET projects, not C#-only scripts. The currently supported command project types are:
+
+- `*.csproj`
+- `*.fsproj`
+- `*.vbproj`
 
 The normal lifecycle is:
 
@@ -104,6 +110,18 @@ The normal lifecycle is:
 5. iterate with `repo reload`
 
 ReaperShell validates `shellpack.json` so `commandsPath` cannot escape the pack root.
+
+## Multi-Language Example
+
+The sample multi-language pack lives at [sample-packs/multi-language-pack](/C:/GitHub/ReaperShell/sample-packs/multi-language-pack).
+
+It contains one command in each supported project type:
+
+- `hello-csharp`
+- `hello-fsharp`
+- `hello-vb`
+
+That pack demonstrates that ReaperShell command packs are regular SDK-style .NET projects, not C#-only scaffolds.
 
 ## Repo Command Manual
 
@@ -222,6 +240,8 @@ Smoke artifacts:
 - [scripts/smoke-hooks.rsh]
 - [scripts/smoke-doctor.rsh]
 - [scripts/smoke-command-forge.rsh]
+- [scripts/smoke-multilang.rsh]
+- [scripts/run-multilang-smoke.ps1]
 - [scripts/run-validation-smoke.ps1]
 - [scripts/run-security-smoke.ps1]
 - [scripts/run-smoke.ps1]
@@ -230,6 +250,12 @@ Run the full smoke harness:
 
 ```powershell
 ./scripts/run-smoke.ps1
+```
+
+Run just the multi-language command pack verification:
+
+```powershell
+./scripts/run-multilang-smoke.ps1
 ```
 
 ## Security Model
@@ -255,6 +281,7 @@ High-level layout:
 - [src/ReaperShell] - host application, built-ins, shell runtime, plugin loader
 - [src/ReaperShell.Abstractions] - shared command contract for host and plugins
 - [sample-packs/hello-pack] - sample live-loadable command pack
+- [sample-packs/multi-language-pack] - sample C#, F#, and VB.NET command pack
 - [scripts] - smoke scripts and validation/security harnesses
 
 Runtime state:

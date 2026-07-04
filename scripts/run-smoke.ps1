@@ -86,6 +86,10 @@ try {
         dotnet $shellDll --state-dir $stateDir --script (Join-Path $repoRoot 'scripts\smoke-command-forge.rsh')
     }
 
+    Invoke-Step 'Running multi-language command pack smoke script' {
+        powershell -ExecutionPolicy Bypass -File (Join-Path $repoRoot 'scripts\run-multilang-smoke.ps1')
+    }
+
     Invoke-Step 'Running validation smoke script' {
         powershell -ExecutionPolicy Bypass -File (Join-Path $repoRoot 'scripts\run-validation-smoke.ps1')
     }

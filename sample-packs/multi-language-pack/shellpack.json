@@ -1,0 +1,6 @@
+{
+  "id": "multi-language-pack",
+  "name": "Multi-Language Pack",
+  "description": "Sample ReaperShell command pack with C#, F#, and VB.NET commands.",
+  "commandsPath": "commands"
+}
