@@ -5,6 +5,13 @@ namespace ReaperShell.Shell;
 
 public sealed class ProcessRunner
 {
+    private readonly ShellSessionState _sessionState;
+
+    public ProcessRunner(ShellSessionState? sessionState = null)
+    {
+        _sessionState = sessionState ?? new ShellSessionState();
+    }
+
     public void StartDetached(
         string executable,
         IReadOnlyList<string> arguments,
@@ -16,6 +23,8 @@ public sealed class ProcessRunner
             WorkingDirectory = workingDirectory,
             UseShellExecute = false
         };
+
+        ApplySessionEnvironment(startInfo);
 
         foreach (var argument in arguments)
         {
@@ -50,6 +59,8 @@ public sealed class ProcessRunner
             RedirectStandardError = true,
             CreateNoWindow = true
         };
+
+        ApplySessionEnvironment(startInfo);
 
         foreach (var argument in arguments)
         {
@@ -117,6 +128,14 @@ public sealed class ProcessRunner
             process.ExitCode,
             standardOutput.ToString(),
             standardError.ToString());
+    }
+
+    private void ApplySessionEnvironment(ProcessStartInfo startInfo)
+    {
+        foreach (var pair in _sessionState.GetEnvironmentVariables())
+        {
+            startInfo.Environment[pair.Key] = pair.Value;
+        }
     }
 }
 

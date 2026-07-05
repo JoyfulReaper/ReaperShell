@@ -106,6 +106,16 @@ public sealed class ShellSettings
 
         return this;
     }
+
+    public void ApplyFrom(ShellSettings source)
+    {
+        Repos = source.Repos;
+        Aliases = source.Aliases;
+        Hooks = source.Hooks;
+        ExternalCommandMode = source.ExternalCommandMode;
+        DefaultConfiguration = source.DefaultConfiguration;
+        EditorCommand = source.EditorCommand;
+    }
 }
 
 public enum ExternalCommandMode

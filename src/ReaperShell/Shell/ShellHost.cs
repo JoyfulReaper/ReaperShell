@@ -17,7 +17,9 @@ public sealed class ShellHost
     private readonly HashSet<string> _activeHookEvents = new(StringComparer.OrdinalIgnoreCase);
     private readonly ProcessRunner _processRunner;
     private readonly string _stateDirectory;
+    private readonly ShellSessionState _sessionState;
     private readonly ShellSettings _settings;
+    private string? _currentProfilePath;
 
     public ShellHost(
         CommandParser commandParser,
@@ -25,7 +27,8 @@ public sealed class ShellHost
         ShellLifetime lifetime,
         ProcessRunner processRunner,
         ShellSettings settings,
-        string stateDirectory)
+        string stateDirectory,
+        ShellSessionState? sessionState = null)
     {
         _commandParser = commandParser;
         _commandRegistry = commandRegistry;
@@ -33,6 +36,7 @@ public sealed class ShellHost
         _processRunner = processRunner;
         _settings = settings;
         _stateDirectory = stateDirectory;
+        _sessionState = sessionState ?? new ShellSessionState();
     }
 
     public bool IsInteractiveModeEnabled { get; private set; }
@@ -51,6 +55,7 @@ public sealed class ShellHost
 
             if (!string.IsNullOrWhiteSpace(profilePath))
             {
+                _currentProfilePath = profilePath;
                 await RunProfileAsync(context, profilePath, cancellationToken);
             }
 
@@ -106,7 +111,7 @@ public sealed class ShellHost
             context,
             scriptPath,
             continueOnError,
-            new CommandExecutionOptions(EchoCommand: true, TriggerCommandHooks: true),
+            new CommandExecutionOptions(EchoCommand: true, TriggerCommandHooks: true, RecordHistory: false),
             cancellationToken);
     }
 
@@ -128,6 +133,7 @@ public sealed class ShellHost
         string profilePath,
         CancellationToken cancellationToken)
     {
+        _currentProfilePath = profilePath;
         if (!File.Exists(profilePath))
         {
             context.WriteErrorLine($"Profile file does not exist: {profilePath}");
@@ -139,7 +145,7 @@ public sealed class ShellHost
             context,
             profilePath,
             continueOnError: true,
-            new CommandExecutionOptions(EchoCommand: true, TriggerCommandHooks: false),
+            new CommandExecutionOptions(EchoCommand: true, TriggerCommandHooks: false, RecordHistory: false),
             cancellationToken);
     }
 
@@ -153,7 +159,7 @@ public sealed class ShellHost
             context,
             ritualPath,
             continueOnError,
-            new CommandExecutionOptions(EchoCommand: true, TriggerCommandHooks: false),
+            new CommandExecutionOptions(EchoCommand: true, TriggerCommandHooks: false, RecordHistory: false),
             cancellationToken);
     }
 
@@ -166,7 +172,7 @@ public sealed class ShellHost
         return await ExecuteCommandAsync(
             context,
             commandText,
-            new CommandExecutionOptions(EchoCommand: echoCommand, TriggerCommandHooks: false),
+            new CommandExecutionOptions(EchoCommand: echoCommand, TriggerCommandHooks: false, RecordHistory: false),
             cancellationToken);
     }
 
@@ -229,7 +235,7 @@ public sealed class ShellHost
                     context,
                     ritualPath,
                     continueOnError: true,
-                    new CommandExecutionOptions(EchoCommand: false, TriggerCommandHooks: false),
+                    new CommandExecutionOptions(EchoCommand: false, TriggerCommandHooks: false, RecordHistory: false),
                     cancellationToken);
 
                 if (exitCode != 0)
@@ -279,6 +285,11 @@ public sealed class ShellHost
             if (!TryResolveCommandTokens(tokens, options.EchoCommand, context, out var resolvedTokens))
             {
                 return 1;
+            }
+
+            if (options.RecordHistory && !IsHistoryCommand(resolvedTokens))
+            {
+                _sessionState.RecordHistory(input);
             }
 
             if (options.TriggerCommandHooks)
@@ -469,6 +480,42 @@ public sealed class ShellHost
         context.WriteErrorLine(hint);
     }
 
+    public async Task<int> ReloadAsync(ShellContext context, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var reloadedSettings = await ShellSettings.LoadOrCreateAsync(_stateDirectory, cancellationToken);
+            _settings.ApplyFrom(reloadedSettings.Normalize());
+            context.WriteLine("Reloaded settings.");
+        }
+        catch (Exception ex)
+        {
+            context.WriteErrorLine($"Failed to reload settings: {ex.Message}");
+            return 1;
+        }
+
+        if (string.IsNullOrWhiteSpace(_currentProfilePath))
+        {
+            context.WriteLine("No active profile to reload.");
+            return 0;
+        }
+
+        if (!File.Exists(_currentProfilePath))
+        {
+            context.WriteErrorLine($"Profile file does not exist: {_currentProfilePath}");
+            return 1;
+        }
+
+        context.WriteLine($"Reloading profile: {_currentProfilePath}");
+        return await RunProfileAsync(context, _currentProfilePath, cancellationToken);
+    }
+
+    private static bool IsHistoryCommand(IReadOnlyList<string> resolvedTokens)
+    {
+        return resolvedTokens.Count > 0 &&
+            string.Equals(resolvedTokens[0], "history", StringComparison.OrdinalIgnoreCase);
+    }
+
     private static async Task ReadInteractiveInputAsync(ChannelWriter<InteractiveWorkItem> writer)
     {
         try
@@ -490,7 +537,7 @@ public sealed class ShellHost
     }
 }
 
-public sealed record CommandExecutionOptions(bool EchoCommand, bool TriggerCommandHooks);
+public sealed record CommandExecutionOptions(bool EchoCommand, bool TriggerCommandHooks, bool RecordHistory = true);
 
 internal sealed record QueuedInteractiveCommand(
     ShellContext Context,

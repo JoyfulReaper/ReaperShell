@@ -30,16 +30,18 @@ internal static class Program
 
         var parser = new CommandParser();
         var registry = new CommandRegistry();
-        var processRunner = new ProcessRunner();
+        var sessionState = new ShellSessionState();
+        var processRunner = new ProcessRunner(sessionState);
         var commandPackManager = new CommandPackManager(registry, processRunner);
         var lifetime = new ShellLifetime();
-        var host = new ShellHost(parser, registry, lifetime, processRunner, settings, stateDirectory);
+        var host = new ShellHost(parser, registry, lifetime, processRunner, settings, stateDirectory, sessionState);
         var watchService = new ShellWatchService(host);
         var editorLauncher = new EditorLauncher(settings, processRunner);
 
         RegisterBuiltIns(
             registry,
             settings,
+            sessionState,
             processRunner,
             commandPackManager,
             lifetime,
@@ -101,6 +103,7 @@ internal static class Program
     private static void RegisterBuiltIns(
         CommandRegistry registry,
         ShellSettings settings,
+        ShellSessionState sessionState,
         ProcessRunner processRunner,
         CommandPackManager commandPackManager,
         ShellLifetime lifetime,
@@ -114,11 +117,14 @@ internal static class Program
         registry.RegisterBuiltIn(new ClearCommand());
         registry.RegisterBuiltIn(new ExitCommand("exit", lifetime));
         registry.RegisterBuiltIn(new ExitCommand("quit", lifetime));
+        registry.RegisterBuiltIn(new VersionCommand());
         registry.RegisterBuiltIn(new PwdCommand());
         registry.RegisterBuiltIn(new LsCommand());
         registry.RegisterBuiltIn(new CdCommand());
         registry.RegisterBuiltIn(new CatCommand());
         registry.RegisterBuiltIn(new EchoCommand());
+        registry.RegisterBuiltIn(new HistoryCommand(sessionState));
+        registry.RegisterBuiltIn(new EnvCommand(sessionState));
         registry.RegisterBuiltIn(new MkdirCommand());
         registry.RegisterBuiltIn(new TouchCommand());
         registry.RegisterBuiltIn(new HeadCommand());
@@ -150,6 +156,7 @@ internal static class Program
                 stateDirectory));
         registry.RegisterBuiltIn(new FortuneCommand());
         registry.RegisterBuiltIn(new PrayCommand());
+        registry.RegisterBuiltIn(new ReloadCommand(host));
         registry.RegisterBuiltIn(
             new RepoCommand(
                 settings,
