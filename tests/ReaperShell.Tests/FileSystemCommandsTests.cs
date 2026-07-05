@@ -25,6 +25,48 @@ public sealed class FileSystemCommandsTests
     }
 
     [Fact]
+    public async Task HeadPrintsFirstLines()
+    {
+        await File.WriteAllLinesAsync(Path.Combine(_root, "head.txt"), ["one", "two", "three", "four"]);
+
+        var (exitCode, stdout, stderr) = await ExecuteAsync(new HeadCommand(), ["-n", "2", "head.txt"]);
+
+        Assert.Equal(0, exitCode);
+        Assert.Equal(new[] { "one", "two" }, SplitLines(stdout));
+        Assert.True(string.IsNullOrWhiteSpace(stderr));
+    }
+
+    [Fact]
+    public async Task TailPrintsLastLines()
+    {
+        await File.WriteAllLinesAsync(Path.Combine(_root, "tail.txt"), ["one", "two", "three", "four"]);
+
+        var (exitCode, stdout, stderr) = await ExecuteAsync(new TailCommand(), ["-n", "2", "tail.txt"]);
+
+        Assert.Equal(0, exitCode);
+        Assert.Equal(new[] { "three", "four" }, SplitLines(stdout));
+        Assert.True(string.IsNullOrWhiteSpace(stderr));
+    }
+
+    [Fact]
+    public async Task GrepReturnsMatchesNoMatchesAndErrors()
+    {
+        await File.WriteAllLinesAsync(Path.Combine(_root, "grep.txt"), ["alpha", "Beta", "gamma beta"]);
+
+        var match = await ExecuteAsync(new GrepCommand(), ["-i", "beta", "grep.txt"]);
+        Assert.Equal(0, match.ExitCode);
+        Assert.Equal(new[] { "Beta", "gamma beta" }, SplitLines(match.StdOut));
+
+        var noMatch = await ExecuteAsync(new GrepCommand(), ["zeta", "grep.txt"]);
+        Assert.Equal(1, noMatch.ExitCode);
+        Assert.True(string.IsNullOrWhiteSpace(noMatch.StdOut));
+
+        var fileError = await ExecuteAsync(new GrepCommand(), ["zeta", "missing.txt"]);
+        Assert.Equal(2, fileError.ExitCode);
+        Assert.Contains("File does not exist", fileError.StdErr);
+    }
+
+    [Fact]
     public async Task MkdirCreatesMultipleDirectoriesRelativeToWorkingDirectory()
     {
         var (exitCode, stdout, stderr) = await ExecuteAsync(new MkdirCommand(), ["alpha", Path.Combine("nested", "beta")]);
@@ -34,6 +76,33 @@ public sealed class FileSystemCommandsTests
         Assert.True(Directory.Exists(Path.Combine(_root, "nested", "beta")));
         Assert.True(string.IsNullOrWhiteSpace(stdout));
         Assert.True(string.IsNullOrWhiteSpace(stderr));
+    }
+
+    [Fact]
+    public async Task TreePrintsSimpleDirectoryStructure()
+    {
+        Directory.CreateDirectory(Path.Combine(_root, "tree-root", "alpha"));
+        Directory.CreateDirectory(Path.Combine(_root, "tree-root", "beta"));
+        await File.WriteAllTextAsync(Path.Combine(_root, "tree-root", "root.txt"), "root");
+        await File.WriteAllTextAsync(Path.Combine(_root, "tree-root", "alpha", "child.txt"), "child");
+
+        var tree = await ExecuteAsync(new TreeCommand(), ["tree-root"]);
+
+        Assert.Equal(0, tree.ExitCode);
+        Assert.Contains("tree-root", tree.StdOut);
+        Assert.Contains("alpha", tree.StdOut);
+        Assert.Contains("beta", tree.StdOut);
+        Assert.Contains("root.txt", tree.StdOut);
+        Assert.Contains("child.txt", tree.StdOut);
+        Assert.True(string.IsNullOrWhiteSpace(tree.StdErr));
+
+        var directoriesOnly = await ExecuteAsync(new TreeCommand(), ["tree-root", "-d"]);
+        Assert.Equal(0, directoriesOnly.ExitCode);
+        Assert.Contains("tree-root", directoriesOnly.StdOut);
+        Assert.Contains("alpha", directoriesOnly.StdOut);
+        Assert.Contains("beta", directoriesOnly.StdOut);
+        Assert.DoesNotContain("root.txt", directoriesOnly.StdOut);
+        Assert.DoesNotContain("child.txt", directoriesOnly.StdOut);
     }
 
     [Fact]
@@ -128,6 +197,16 @@ public sealed class FileSystemCommandsTests
         Assert.Equal("dir move", await File.ReadAllTextAsync(Path.Combine(_root, "target-parent", "source-dir", "inner", "data.txt")));
     }
 
+    [Fact]
+    public async Task OpenValidatesArgumentCount()
+    {
+        var (exitCode, stdout, stderr) = await ExecuteAsync(new OpenCommand(), []);
+
+        Assert.Equal(1, exitCode);
+        Assert.True(string.IsNullOrWhiteSpace(stdout));
+        Assert.Contains("Usage: open <path-or-url>", stderr);
+    }
+
     private async Task<CommandResult> ExecuteAsync(IShellCommand command, IReadOnlyList<string> args)
     {
         var stdout = new StringWriter();
@@ -135,6 +214,11 @@ public sealed class FileSystemCommandsTests
         var context = new ShellContext(stdout, stderr, new DirectoryInfo(_root), services: null, CancellationToken.None);
         var exitCode = await command.ExecuteAsync(context, args, CancellationToken.None);
         return new CommandResult(exitCode, stdout.ToString(), stderr.ToString());
+    }
+
+    private static string[] SplitLines(string value)
+    {
+        return value.Split(Environment.NewLine, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
     }
 
     public sealed record CommandResult(int ExitCode, string StdOut, string StdErr);

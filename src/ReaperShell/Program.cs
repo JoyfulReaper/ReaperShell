@@ -121,6 +121,11 @@ internal static class Program
         registry.RegisterBuiltIn(new EchoCommand());
         registry.RegisterBuiltIn(new MkdirCommand());
         registry.RegisterBuiltIn(new TouchCommand());
+        registry.RegisterBuiltIn(new HeadCommand());
+        registry.RegisterBuiltIn(new TailCommand());
+        registry.RegisterBuiltIn(new GrepCommand());
+        registry.RegisterBuiltIn(new TreeCommand());
+        registry.RegisterBuiltIn(new OpenCommand());
         registry.RegisterBuiltIn(new RmCommand());
         registry.RegisterBuiltIn(new CpCommand());
         registry.RegisterBuiltIn(new MvCommand());
