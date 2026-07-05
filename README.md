@@ -172,6 +172,7 @@ Git-backed workflows:
 - `repo commit <name> "message"` stages and commits changes
 - `repo push <name>` pushes the repo
 - `repo save <name> "message"` commits and then pushes
+- `repo publish <name> <owner/repo> [--private|--public]` creates a GitHub repo with `gh repo create`, using `gh auth login` first
 
 Bulk operations:
 
@@ -207,6 +208,11 @@ ReaperShell can scaffold new commands inside an existing pack:
 - `command new <repo> <name> --template basic`
 - `command new <repo> <name> --template file`
 - `command new <repo> <name> --template process`
+- `command new <repo> <name> --language csharp`
+- `command new <repo> <name> --language fsharp`
+- `command new <repo> <name> --language vb`
+
+C# is the default language. Supported aliases include `cs` and `c#` for C#, `fs` and `f#` for F#, and `vbnet`, `visualbasic`, and `visual-basic` for VB.NET.
 
 Template summary:
 
