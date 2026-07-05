@@ -87,6 +87,8 @@ Useful execution flags:
 - `--profile <path>` uses a specific startup profile
 - `--no-profile` skips profile execution
 
+Unknown commands can optionally fall back to PATH-only executables through `externalCommandMode` in `.rsh/settings.json`. The supported values are `Disabled`, `PathOnly` (default), and `Shell` (reserved for a future shell fallback).
+
 ## Command Pack Model
 
 A command pack is a local folder or Git-backed repo containing:

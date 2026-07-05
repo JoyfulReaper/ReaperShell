@@ -15,6 +15,7 @@ public sealed class ShellHost
     private readonly object _hookGate = new();
     private readonly ShellLifetime _lifetime;
     private readonly HashSet<string> _activeHookEvents = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ProcessRunner _processRunner;
     private readonly string _stateDirectory;
     private readonly ShellSettings _settings;
 
@@ -22,12 +23,14 @@ public sealed class ShellHost
         CommandParser commandParser,
         CommandRegistry commandRegistry,
         ShellLifetime lifetime,
+        ProcessRunner processRunner,
         ShellSettings settings,
         string stateDirectory)
     {
         _commandParser = commandParser;
         _commandRegistry = commandRegistry;
         _lifetime = lifetime;
+        _processRunner = processRunner;
         _settings = settings;
         _stateDirectory = stateDirectory;
     }
@@ -283,15 +286,18 @@ public sealed class ShellHost
                 await RunHookEventAsync(context, ShellHookEventNames.BeforeCommand, cancellationToken);
             }
 
-            if (!_commandRegistry.TryGet(resolvedTokens[0], out var command))
-            {
-                context.WriteErrorLine($"Unknown command: {resolvedTokens[0]}");
-                return 1;
-            }
-
             var exitCode = 1;
             try
             {
+                if (!_commandRegistry.TryGet(resolvedTokens[0], out var command))
+                {
+                    exitCode = await TryRunExternalCommandAsync(
+                        context,
+                        resolvedTokens,
+                        cancellationToken);
+                    return exitCode;
+                }
+
                 exitCode = await command.ExecuteAsync(context, resolvedTokens.Skip(1).ToArray(), cancellationToken);
                 return exitCode;
             }
@@ -405,6 +411,62 @@ public sealed class ShellHost
         }
 
         return true;
+    }
+
+    private async Task<int> TryRunExternalCommandAsync(
+        ShellContext context,
+        IReadOnlyList<string> resolvedTokens,
+        CancellationToken cancellationToken)
+    {
+        var commandName = resolvedTokens[0];
+        switch (_settings.ExternalCommandMode)
+        {
+            case ExternalCommandMode.Disabled:
+                WriteUnknownCommand(context, commandName, "External command fallback is disabled.");
+                return 1;
+
+            case ExternalCommandMode.Shell:
+                WriteUnknownCommand(context, commandName, "External command mode 'Shell' is not implemented.");
+                return 1;
+
+            case ExternalCommandMode.PathOnly:
+                if (!ExternalCommandResolver.TryResolveExecutable(commandName, out var executablePath))
+                {
+                    WriteUnknownCommand(context, commandName, $"No executable named '{commandName}' was found on PATH.");
+                    return 1;
+                }
+
+                try
+                {
+                    return (await _processRunner.RunAsync(
+                        executablePath,
+                        resolvedTokens.Skip(1).ToArray(),
+                        context.WorkingDirectory.FullName,
+                        context.WriteLine,
+                        context.WriteErrorLine,
+                        cancellationToken: cancellationToken)).ExitCode;
+                }
+                catch (OperationCanceledException)
+                {
+                    context.WriteErrorLine("Command canceled.");
+                    return 1;
+                }
+                catch (Exception ex)
+                {
+                    context.WriteErrorLine($"External command failed: {ex.Message}");
+                    return 1;
+                }
+
+            default:
+                WriteUnknownCommand(context, commandName, "External command fallback is unavailable.");
+                return 1;
+        }
+    }
+
+    private static void WriteUnknownCommand(ShellContext context, string commandName, string hint)
+    {
+        context.WriteErrorLine($"Unknown command: {commandName}");
+        context.WriteErrorLine(hint);
     }
 
     private static async Task ReadInteractiveInputAsync(ChannelWriter<InteractiveWorkItem> writer)

@@ -21,6 +21,9 @@ public sealed class ShellSettings
     public Dictionary<string, List<string>> Hooks { get; set; } =
         new(StringComparer.OrdinalIgnoreCase);
 
+    [JsonConverter(typeof(JsonStringEnumConverter))]
+    public ExternalCommandMode ExternalCommandMode { get; set; } = ExternalCommandMode.PathOnly;
+
     public string DefaultConfiguration { get; set; } = "Debug";
 
     public string? EditorCommand { get; set; }
@@ -96,8 +99,20 @@ public sealed class ShellSettings
                         pair.Value?.Where(ritual => !string.IsNullOrWhiteSpace(ritual)).ToList() ?? [])),
                 StringComparer.OrdinalIgnoreCase);
 
+        if (!Enum.IsDefined(typeof(global::ReaperShell.Shell.ExternalCommandMode), ExternalCommandMode))
+        {
+            ExternalCommandMode = ExternalCommandMode.PathOnly;
+        }
+
         return this;
     }
+}
+
+public enum ExternalCommandMode
+{
+    Disabled,
+    PathOnly,
+    Shell
 }
 
 public sealed class CommandRepoSettings

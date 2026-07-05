@@ -37,7 +37,13 @@ public sealed class WhichCommand : IShellCommand
 
         if (!_commandRegistry.TryGetDescriptor(args[0], out var descriptor))
         {
-            context.WriteErrorLine($"Command '{args[0]}' is not registered.");
+            if (ExternalCommandResolver.TryResolveExecutable(args[0], out var executablePath))
+            {
+                context.WriteLine($"external executable -> {executablePath}");
+                return Task.FromResult(0);
+            }
+
+            context.WriteErrorLine($"Command '{args[0]}' is not registered and was not found on PATH.");
             return Task.FromResult(1);
         }
 

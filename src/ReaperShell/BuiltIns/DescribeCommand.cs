@@ -41,7 +41,16 @@ public sealed class DescribeCommand : IShellCommand
 
         if (!_commandRegistry.TryGetDescriptor(commandName, out var descriptor))
         {
-            context.WriteErrorLine($"Command '{commandName}' is not registered.");
+            if (ExternalCommandResolver.TryResolveExecutable(commandName, out var executablePath))
+            {
+                context.WriteLine($"NAME: {commandName}");
+                context.WriteLine("DESCRIPTION: External executable on PATH");
+                context.WriteLine("SOURCE: external");
+                context.WriteLine($"PATH: {executablePath}");
+                return Task.FromResult(0);
+            }
+
+            context.WriteErrorLine($"Command '{commandName}' is not registered and was not found on PATH.");
             return Task.FromResult(1);
         }
 

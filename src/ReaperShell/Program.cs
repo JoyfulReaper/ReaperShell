@@ -33,7 +33,7 @@ internal static class Program
         var processRunner = new ProcessRunner();
         var commandPackManager = new CommandPackManager(registry, processRunner);
         var lifetime = new ShellLifetime();
-        var host = new ShellHost(parser, registry, lifetime, settings, stateDirectory);
+        var host = new ShellHost(parser, registry, lifetime, processRunner, settings, stateDirectory);
         var watchService = new ShellWatchService(host);
         var editorLauncher = new EditorLauncher(settings, processRunner);
 
