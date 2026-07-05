@@ -41,12 +41,14 @@ public sealed class DescribeCommand : IShellCommand
 
         if (!_commandRegistry.TryGetDescriptor(commandName, out var descriptor))
         {
-            if (ExternalCommandResolver.TryResolveExecutable(commandName, out var executablePath))
+            if (ExternalCommandDiagnostics.TryGetInfo(commandName, _settings, out var info))
             {
                 context.WriteLine($"NAME: {commandName}");
                 context.WriteLine("DESCRIPTION: External executable on PATH");
                 context.WriteLine("SOURCE: external");
-                context.WriteLine($"PATH: {executablePath}");
+                context.WriteLine($"PATH: {info.Path}");
+                context.WriteLine($"EXTERNAL COMMAND MODE: {info.Mode}");
+                context.WriteLine($"RUNNABLE: {info.RunnableText}");
                 return Task.FromResult(0);
             }
 

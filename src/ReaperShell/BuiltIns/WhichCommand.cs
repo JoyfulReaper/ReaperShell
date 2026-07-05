@@ -37,9 +37,11 @@ public sealed class WhichCommand : IShellCommand
 
         if (!_commandRegistry.TryGetDescriptor(args[0], out var descriptor))
         {
-            if (ExternalCommandResolver.TryResolveExecutable(args[0], out var executablePath))
+            if (ExternalCommandDiagnostics.TryGetInfo(args[0], _settings, out var info))
             {
-                context.WriteLine($"external executable -> {executablePath}");
+                context.WriteLine($"external executable -> {info.Path}");
+                context.WriteLine($"external command mode -> {info.Mode}");
+                context.WriteLine($"runnable -> {info.RunnableText.ToLowerInvariant()}");
                 return Task.FromResult(0);
             }
 

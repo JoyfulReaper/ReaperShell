@@ -99,6 +99,34 @@ return 17;
     }
 
     [Fact]
+    public async Task PluginCommandWinsOverExternalExecutable()
+    {
+        var originalPath = Environment.GetEnvironmentVariable("PATH");
+        try
+        {
+            var helperDirectory = Path.GetDirectoryName(_helperExecutablePath)!;
+            Environment.SetEnvironmentVariable("PATH", helperDirectory + Path.PathSeparator + originalPath);
+
+            var (exitCode, stdout, stderr) = await RunShellCommandAsync(
+                "fixture-command",
+                new ShellSettings { ExternalCommandMode = ExternalCommandMode.PathOnly },
+                registry =>
+                {
+                    registry.RegisterPlugin(new ConstantCommand("fixture-command", "plugin-wins"), "test-pack", "test-pack-path");
+                });
+
+            Assert.Equal(0, exitCode);
+            Assert.Contains("plugin-wins", stdout);
+            Assert.DoesNotContain("external executable", stdout, StringComparison.OrdinalIgnoreCase);
+            Assert.True(string.IsNullOrWhiteSpace(stderr));
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("PATH", originalPath);
+        }
+    }
+
+    [Fact]
     public async Task DisabledExternalFallbackReportsUnknownCommand()
     {
         var (exitCode, stdout, stderr) = await RunShellCommandAsync(
@@ -161,7 +189,7 @@ return 17;
     }
 
     [Fact]
-    public async Task WhichReportsExternalExecutableWhenFoundOnPath()
+    public async Task WhichReportsPathOnlyExecutableAsRunnable()
     {
         var originalPath = Environment.GetEnvironmentVariable("PATH");
         try
@@ -170,12 +198,93 @@ return 17;
             Environment.SetEnvironmentVariable("PATH", helperDirectory + Path.PathSeparator + originalPath);
 
             var (exitCode, stdout, stderr) = await RunBuiltInCommandAsync(
-                new WhichCommand(new ShellSettings(), new CommandRegistry()),
+                new WhichCommand(new ShellSettings { ExternalCommandMode = ExternalCommandMode.PathOnly }, new CommandRegistry()),
                 "fixture-command");
 
             Assert.Equal(0, exitCode);
             Assert.Contains("external executable ->", stdout);
+            Assert.Contains("external command mode -> PathOnly", stdout);
+            Assert.Contains("runnable -> yes", stdout, StringComparison.OrdinalIgnoreCase);
             Assert.Contains("fixture-command", stdout, StringComparison.OrdinalIgnoreCase);
+            Assert.True(string.IsNullOrWhiteSpace(stderr));
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("PATH", originalPath);
+        }
+    }
+
+    [Fact]
+    public async Task WhichReportsDisabledExternalExecutableAsNotRunnable()
+    {
+        var originalPath = Environment.GetEnvironmentVariable("PATH");
+        try
+        {
+            var helperDirectory = Path.GetDirectoryName(_helperExecutablePath)!;
+            Environment.SetEnvironmentVariable("PATH", helperDirectory + Path.PathSeparator + originalPath);
+
+            var (exitCode, stdout, stderr) = await RunBuiltInCommandAsync(
+                new WhichCommand(new ShellSettings { ExternalCommandMode = ExternalCommandMode.Disabled }, new CommandRegistry()),
+                "fixture-command");
+
+            Assert.Equal(0, exitCode);
+            Assert.Contains("external executable ->", stdout);
+            Assert.Contains("external command mode -> Disabled", stdout);
+            Assert.Contains("runnable -> no, external command fallback is disabled", stdout, StringComparison.OrdinalIgnoreCase);
+            Assert.True(string.IsNullOrWhiteSpace(stderr));
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("PATH", originalPath);
+        }
+    }
+
+    [Fact]
+    public async Task DescribeReportsPathOnlyExecutableAsRunnable()
+    {
+        var originalPath = Environment.GetEnvironmentVariable("PATH");
+        try
+        {
+            var helperDirectory = Path.GetDirectoryName(_helperExecutablePath)!;
+            Environment.SetEnvironmentVariable("PATH", helperDirectory + Path.PathSeparator + originalPath);
+
+            var (exitCode, stdout, stderr) = await RunBuiltInCommandAsync(
+                new DescribeCommand(new ShellSettings { ExternalCommandMode = ExternalCommandMode.PathOnly }, new CommandRegistry()),
+                "fixture-command");
+
+            Assert.Equal(0, exitCode);
+            Assert.Contains("NAME: fixture-command", stdout);
+            Assert.Contains("SOURCE: external", stdout);
+            Assert.Contains($"PATH: {_helperExecutablePath}", stdout, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("EXTERNAL COMMAND MODE: PathOnly", stdout);
+            Assert.Contains("RUNNABLE: Yes", stdout);
+            Assert.True(string.IsNullOrWhiteSpace(stderr));
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("PATH", originalPath);
+        }
+    }
+
+    [Fact]
+    public async Task DescribeReportsDisabledExternalExecutableAsNotRunnable()
+    {
+        var originalPath = Environment.GetEnvironmentVariable("PATH");
+        try
+        {
+            var helperDirectory = Path.GetDirectoryName(_helperExecutablePath)!;
+            Environment.SetEnvironmentVariable("PATH", helperDirectory + Path.PathSeparator + originalPath);
+
+            var (exitCode, stdout, stderr) = await RunBuiltInCommandAsync(
+                new DescribeCommand(new ShellSettings { ExternalCommandMode = ExternalCommandMode.Disabled }, new CommandRegistry()),
+                "fixture-command");
+
+            Assert.Equal(0, exitCode);
+            Assert.Contains("NAME: fixture-command", stdout);
+            Assert.Contains("SOURCE: external", stdout);
+            Assert.Contains($"PATH: {_helperExecutablePath}", stdout, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("EXTERNAL COMMAND MODE: Disabled", stdout);
+            Assert.Contains("RUNNABLE: No, external command fallback is disabled", stdout);
             Assert.True(string.IsNullOrWhiteSpace(stderr));
         }
         finally
