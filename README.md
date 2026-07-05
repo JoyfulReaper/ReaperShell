@@ -207,6 +207,11 @@ ReaperShell can scaffold new commands inside an existing pack:
 - `command new <repo> <name> --template basic`
 - `command new <repo> <name> --template file`
 - `command new <repo> <name> --template process`
+- `command new <repo> <name> --language csharp`
+- `command new <repo> <name> --language fsharp`
+- `command new <repo> <name> --language vb`
+
+C# is the default language. Supported aliases include `cs` and `c#` for C#, `fs` and `f#` for F#, and `vbnet`, `visualbasic`, and `visual-basic` for VB.NET.
 
 Template summary:
 
