@@ -103,7 +103,7 @@ public sealed class EnvCommand : IShellCommand
     {
         if (args.Count != 2)
         {
-            context.WriteErrorLine("Usage: env unset <name>");
+            context.WriteErrorLine("Usage: env unset <name> (removes the session override only)");
             return 1;
         }
 
@@ -113,7 +113,7 @@ public sealed class EnvCommand : IShellCommand
             return 1;
         }
 
-        context.WriteLine($"Removed session override '{args[1]}'.");
+        context.WriteLine($"Removed session override '{args[1]}'. Inherited OS environment values remain unchanged.");
         return 0;
     }
 

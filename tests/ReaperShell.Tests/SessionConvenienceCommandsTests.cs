@@ -125,6 +125,7 @@ return 0;
             var unset = await ExecuteBuiltInAsync(envCommand, ["unset", "RSH_SESSION_TEST"]);
             Assert.Equal(0, unset.ExitCode);
             Assert.Contains("Removed session override", unset.StdOut);
+            Assert.Contains("Inherited OS environment values remain unchanged", unset.StdOut);
 
             Environment.SetEnvironmentVariable("RSH_SESSION_TEST", "inherited-value");
 
@@ -137,6 +138,17 @@ return 0;
         {
             Environment.SetEnvironmentVariable("RSH_SESSION_TEST", originalValue);
         }
+    }
+
+    [Fact]
+    public async Task EnvUnsetUsageMentionsSessionOverrideOnly()
+    {
+        var envCommand = new EnvCommand(new ShellSessionState());
+        var (exitCode, stdout, stderr) = await ExecuteBuiltInAsync(envCommand, ["unset"]);
+
+        Assert.Equal(1, exitCode);
+        Assert.True(string.IsNullOrWhiteSpace(stdout));
+        Assert.Contains("session override only", stderr, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]

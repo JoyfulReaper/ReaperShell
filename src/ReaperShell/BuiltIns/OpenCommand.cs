@@ -20,7 +20,14 @@ public sealed class OpenCommand : IShellCommand
             return Task.FromResult(1);
         }
 
+        var isUrl = LooksLikeUrl(args[0]);
         var target = ResolveTarget(context, args[0]);
+        if (!isUrl && !File.Exists(target) && !Directory.Exists(target))
+        {
+            context.WriteErrorLine($"Local path does not exist: {target}");
+            return Task.FromResult(1);
+        }
+
         try
         {
             var startInfo = new ProcessStartInfo

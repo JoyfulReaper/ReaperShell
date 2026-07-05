@@ -44,10 +44,20 @@ internal static class FileSystemCommandHelpers
     {
         Directory.CreateDirectory(destinationDirectory);
 
-        foreach (var childDirectory in Directory.GetDirectories(sourceDirectory))
+        foreach (var childEntry in new DirectoryInfo(sourceDirectory).EnumerateFileSystemInfos())
         {
-            var childDestination = Path.Combine(destinationDirectory, Path.GetFileName(childDirectory));
-            CopyDirectoryRecursive(childDirectory, childDestination, overwriteFiles);
+            if (childEntry is not DirectoryInfo childDirectory)
+            {
+                continue;
+            }
+
+            if ((childDirectory.Attributes & FileAttributes.ReparsePoint) != 0)
+            {
+                continue;
+            }
+
+            var childDestination = Path.Combine(destinationDirectory, childDirectory.Name);
+            CopyDirectoryRecursive(childDirectory.FullName, childDestination, overwriteFiles);
         }
 
         foreach (var file in Directory.GetFiles(sourceDirectory))

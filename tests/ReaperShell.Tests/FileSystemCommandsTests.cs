@@ -178,6 +178,32 @@ public sealed class FileSystemCommandsTests
     }
 
     [Fact]
+    public async Task CpRecursiveSkipsReparsePointDirectoriesWhenSupported()
+    {
+        var sourceRoot = Path.Combine(_root, "reparse-source");
+        var linkedTarget = Path.Combine(_root, "linked-target");
+        var linkPath = Path.Combine(sourceRoot, "linked");
+        var destinationRoot = Path.Combine(_root, "reparse-copy");
+
+        Directory.CreateDirectory(sourceRoot);
+        Directory.CreateDirectory(linkedTarget);
+        await File.WriteAllTextAsync(Path.Combine(linkedTarget, "outside.txt"), "outside");
+        await File.WriteAllTextAsync(Path.Combine(sourceRoot, "kept.txt"), "kept");
+
+        if (!TryCreateDirectorySymbolicLink(linkPath, linkedTarget))
+        {
+            return;
+        }
+
+        var result = await ExecuteAsync(new CpCommand(), ["-r", "reparse-source", "reparse-copy"]);
+
+        Assert.Equal(0, result.ExitCode);
+        Assert.True(File.Exists(Path.Combine(destinationRoot, "kept.txt")));
+        Assert.False(Directory.Exists(Path.Combine(destinationRoot, "linked")));
+        Assert.False(File.Exists(Path.Combine(destinationRoot, "linked", "outside.txt")));
+    }
+
+    [Fact]
     public async Task MvMovesAndRenamesFilesAndDirectories()
     {
         await File.WriteAllTextAsync(Path.Combine(_root, "from.txt"), "move me");
@@ -207,6 +233,16 @@ public sealed class FileSystemCommandsTests
         Assert.Contains("Usage: open <path-or-url>", stderr);
     }
 
+    [Fact]
+    public async Task OpenMissingLocalPathReturnsError()
+    {
+        var (exitCode, stdout, stderr) = await ExecuteAsync(new OpenCommand(), ["missing-local-path"]);
+
+        Assert.Equal(1, exitCode);
+        Assert.True(string.IsNullOrWhiteSpace(stdout));
+        Assert.Contains("Local path does not exist", stderr);
+    }
+
     private async Task<CommandResult> ExecuteAsync(IShellCommand command, IReadOnlyList<string> args)
     {
         var stdout = new StringWriter();
@@ -219,6 +255,19 @@ public sealed class FileSystemCommandsTests
     private static string[] SplitLines(string value)
     {
         return value.Split(Environment.NewLine, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+    }
+
+    private static bool TryCreateDirectorySymbolicLink(string linkPath, string targetPath)
+    {
+        try
+        {
+            Directory.CreateSymbolicLink(linkPath, targetPath);
+            return true;
+        }
+        catch (Exception)
+        {
+            return false;
+        }
     }
 
     public sealed record CommandResult(int ExitCode, string StdOut, string StdErr);
