@@ -164,7 +164,8 @@ public sealed class DoctorCommand : IShellCommand
             ["--version"],
             "gh executable is available.",
             "gh executable is unavailable.",
-            cancellationToken);
+            cancellationToken,
+            warnOnFailure: true);
 
         var editorCommand = await _editorLauncher.ResolveEditorCommandAsync(context, cancellationToken);
         if (editorCommand is not null)
@@ -408,7 +409,8 @@ public sealed class DoctorCommand : IShellCommand
         string successMessage,
         string failureMessage,
         CancellationToken cancellationToken,
-        string? detailsPrefix = null)
+        string? detailsPrefix = null,
+        bool warnOnFailure = false)
     {
         try
         {
@@ -435,7 +437,14 @@ public sealed class DoctorCommand : IShellCommand
             }
             else
             {
-                report.Fail(failureMessage, JoinDetails(details));
+                if (warnOnFailure)
+                {
+                    report.Warn(failureMessage, JoinDetails(details));
+                }
+                else
+                {
+                    report.Fail(failureMessage, JoinDetails(details));
+                }
             }
         }
         catch (Exception ex)
@@ -443,7 +452,14 @@ public sealed class DoctorCommand : IShellCommand
             var details = string.IsNullOrWhiteSpace(detailsPrefix)
                 ? ex.Message
                 : $"{detailsPrefix}{Environment.NewLine}{ex.Message}";
-            report.Fail(failureMessage, details);
+            if (warnOnFailure)
+            {
+                report.Warn(failureMessage, details);
+            }
+            else
+            {
+                report.Fail(failureMessage, details);
+            }
         }
     }
 

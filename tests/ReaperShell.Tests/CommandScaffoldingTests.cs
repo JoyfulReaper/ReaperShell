@@ -10,7 +10,7 @@ namespace ReaperShell.Tests;
 public sealed class CommandScaffoldingTests : IDisposable
 {
     private readonly string _root = Path.Combine(Path.GetTempPath(), "ReaperShell.CommandScaffoldingTests", Guid.NewGuid().ToString("N"));
-    private readonly string _workspaceRoot = FindWorkspaceRoot();
+    private readonly string _workspaceRoot = WorkspaceRootResolver.FindWorkspaceRoot();
 
     public CommandScaffoldingTests()
     {
@@ -88,6 +88,30 @@ public sealed class CommandScaffoldingTests : IDisposable
 
         Assert.Equal(1, result.ExitCode);
         Assert.Contains("Unknown language: ada", result.StdErr);
+    }
+
+    [Fact]
+    public void WorkspaceRootResolverFindsRepositoryRootFromNestedPath()
+    {
+        var tempRoot = Path.Combine(_root, "workspace-root");
+        var nestedPath = Path.Combine(tempRoot, "src", "ReaperShell", "bin", "Debug", "net10.0");
+        Directory.CreateDirectory(nestedPath);
+        File.WriteAllText(Path.Combine(tempRoot, "ReaperShell.slnx"), string.Empty);
+
+        var resolved = WorkspaceRootResolver.FindWorkspaceRoot(nestedPath);
+
+        Assert.Equal(tempRoot, resolved);
+    }
+
+    [Fact]
+    public void WorkspaceRootResolverThrowsWhenNoRootCanBeFound()
+    {
+        var pathA = Path.Combine(_root, "missing-a");
+        var pathB = Path.Combine(_root, "missing-b");
+
+        var exception = Assert.Throws<InvalidOperationException>(() => WorkspaceRootResolver.FindWorkspaceRoot(pathA, pathB));
+
+        Assert.Contains("Could not locate the ReaperShell workspace root.", exception.Message);
     }
 
     [Theory]
@@ -251,22 +275,6 @@ public sealed class CommandScaffoldingTests : IDisposable
         {
             throw new InvalidOperationException($"Build failed for '{projectPath}' with exit code {process.ExitCode}.");
         }
-    }
-
-    private static string FindWorkspaceRoot()
-    {
-        var current = new DirectoryInfo(AppContext.BaseDirectory);
-        while (current is not null)
-        {
-            if (File.Exists(Path.Combine(current.FullName, "ReaperShell.slnx")))
-            {
-                return current.FullName;
-            }
-
-            current = current.Parent;
-        }
-
-        throw new InvalidOperationException("Could not locate the repository root.");
     }
 
     private static string SafeToken(string value)
