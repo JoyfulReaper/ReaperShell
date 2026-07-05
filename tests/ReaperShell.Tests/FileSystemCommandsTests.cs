@@ -282,6 +282,19 @@ public sealed class FileSystemCommandsTests : IDisposable
         Assert.Contains("Local path does not exist", stderr);
     }
 
+    [Fact]
+    public async Task OpenMissingFileUriReturnsError()
+    {
+        var missingPath = Path.Combine(_root, "missing-file-uri.txt");
+        var missingFileUri = new Uri(missingPath).AbsoluteUri;
+
+        var (exitCode, stdout, stderr) = await ExecuteAsync(new OpenCommand(), [missingFileUri]);
+
+        Assert.Equal(1, exitCode);
+        Assert.True(string.IsNullOrWhiteSpace(stdout));
+        Assert.Contains("Local path does not exist", stderr);
+    }
+
     private async Task<CommandResult> ExecuteAsync(IShellCommand command, IReadOnlyList<string> args)
     {
         var stdout = new StringWriter();

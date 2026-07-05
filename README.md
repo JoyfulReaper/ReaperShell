@@ -89,6 +89,30 @@ Useful execution flags:
 
 Unknown commands can optionally fall back to PATH-only executables through `externalCommandMode` in `.rsh/settings.json`. The supported values are `Disabled`, `PathOnly` (default), and `Shell` (reserved for a future shell fallback).
 
+## Built-In Commands
+
+Common built-ins:
+
+- `version` prints shell, runtime, OS, and process information
+- `history` shows commands from the current session
+- `history clear` clears the current session history
+- `env` lists session environment overrides
+- `env get <name>` reads a session override or inherited process value
+- `env set <name> <value>` sets a session environment override
+- `env unset <name>` removes a session override only
+- `reload` reloads settings and the active profile conservatively
+- `echo` prints arguments joined by spaces
+- `mkdir` creates directories
+- `touch` creates files or updates timestamps
+- `head` prints the first lines of a file
+- `tail` prints the last lines of a file
+- `grep` searches for matching lines in a file
+- `tree` prints a simple directory tree
+- `open` opens a file, directory, or URL with the OS default handler
+- `rm` removes files and directories with explicit recursive/force flags
+- `cp` copies files and directories
+- `mv` moves or renames files and directories
+
 ## Command Pack Model
 
 A command pack is a local folder or Git-backed repo containing:
@@ -115,7 +139,7 @@ ReaperShell validates `shellpack.json` so `commandsPath` cannot escape the pack 
 
 ## Multi-Language Example
 
-The sample multi-language pack lives at [sample-packs/multi-language-pack](/C:/GitHub/ReaperShell/sample-packs/multi-language-pack).
+The sample multi-language pack lives at [sample-packs/multi-language-pack](sample-packs/multi-language-pack).
 
 It contains one command in each supported project type:
 
@@ -235,18 +259,18 @@ Diagnostics:
 
 Smoke artifacts:
 
-- [scripts/smoke-sample.rsh]
-- [scripts/smoke-generated.rsh]
-- [scripts/smoke-repo-lifecycle.rsh]
-- [scripts/smoke-customization.rsh]
-- [scripts/smoke-hooks.rsh]
-- [scripts/smoke-doctor.rsh]
-- [scripts/smoke-command-forge.rsh]
-- [scripts/smoke-multilang.rsh]
-- [scripts/run-multilang-smoke.ps1]
-- [scripts/run-validation-smoke.ps1]
-- [scripts/run-security-smoke.ps1]
-- [scripts/run-smoke.ps1]
+- [scripts/smoke-sample.rsh](scripts/smoke-sample.rsh)
+- [scripts/smoke-generated.rsh](scripts/smoke-generated.rsh)
+- [scripts/smoke-repo-lifecycle.rsh](scripts/smoke-repo-lifecycle.rsh)
+- [scripts/smoke-customization.rsh](scripts/smoke-customization.rsh)
+- [scripts/smoke-hooks.rsh](scripts/smoke-hooks.rsh)
+- [scripts/smoke-doctor.rsh](scripts/smoke-doctor.rsh)
+- [scripts/smoke-command-forge.rsh](scripts/smoke-command-forge.rsh)
+- [scripts/smoke-multilang.rsh](scripts/smoke-multilang.rsh)
+- [scripts/run-multilang-smoke.ps1](scripts/run-multilang-smoke.ps1)
+- [scripts/run-validation-smoke.ps1](scripts/run-validation-smoke.ps1)
+- [scripts/run-security-smoke.ps1](scripts/run-security-smoke.ps1)
+- [scripts/run-smoke.ps1](scripts/run-smoke.ps1)
 
 Run the full smoke harness:
 
@@ -280,11 +304,11 @@ What ReaperShell does try to do:
 
 High-level layout:
 
-- [src/ReaperShell] - host application, built-ins, shell runtime, plugin loader
-- [src/ReaperShell.Abstractions] - shared command contract for host and plugins
-- [sample-packs/hello-pack] - sample live-loadable command pack
-- [sample-packs/multi-language-pack] - sample C#, F#, and VB.NET command pack
-- [scripts] - smoke scripts and validation/security harnesses
+- [src/ReaperShell](src/ReaperShell) - host application, built-ins, shell runtime, plugin loader
+- [src/ReaperShell.Abstractions](src/ReaperShell.Abstractions) - shared command contract for host and plugins
+- [sample-packs/hello-pack](sample-packs/hello-pack) - sample live-loadable command pack
+- [sample-packs/multi-language-pack](sample-packs/multi-language-pack) - sample C#, F#, and VB.NET command pack
+- [scripts](scripts) - smoke scripts and validation/security harnesses
 
 Runtime state:
 

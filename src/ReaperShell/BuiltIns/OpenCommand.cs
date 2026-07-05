@@ -20,11 +20,10 @@ public sealed class OpenCommand : IShellCommand
             return Task.FromResult(1);
         }
 
-        var isUrl = LooksLikeUrl(args[0]);
-        var target = ResolveTarget(context, args[0]);
-        if (!isUrl && !File.Exists(target) && !Directory.Exists(target))
+        var targetResult = ResolveTarget(context, args[0]);
+        if (!targetResult.IsUrl && !File.Exists(targetResult.Target) && !Directory.Exists(targetResult.Target))
         {
-            context.WriteErrorLine($"Local path does not exist: {target}");
+            context.WriteErrorLine($"Local path does not exist: {targetResult.Target}");
             return Task.FromResult(1);
         }
 
@@ -32,7 +31,7 @@ public sealed class OpenCommand : IShellCommand
         {
             var startInfo = new ProcessStartInfo
             {
-                FileName = target,
+                FileName = targetResult.Target,
                 UseShellExecute = true,
                 WorkingDirectory = context.WorkingDirectory.FullName
             };
@@ -42,26 +41,33 @@ public sealed class OpenCommand : IShellCommand
         }
         catch (Exception ex)
         {
-            context.WriteErrorLine($"Failed to open '{target}': {ex.Message}");
+            context.WriteErrorLine($"Failed to open '{targetResult.Target}': {ex.Message}");
             return Task.FromResult(1);
         }
     }
 
-    private static string ResolveTarget(ShellContext context, string input)
+    private static ResolvedTarget ResolveTarget(ShellContext context, string input)
     {
-        if (LooksLikeUrl(input))
+        if (TryResolveHttpOrHttpsUrl(input, out var url))
         {
-            return input;
+            return new ResolvedTarget(url, true);
         }
 
-        return Path.GetFullPath(input, context.WorkingDirectory.FullName);
+        if (Uri.TryCreate(input, UriKind.Absolute, out var uri) &&
+            string.Equals(uri.Scheme, Uri.UriSchemeFile, StringComparison.OrdinalIgnoreCase))
+        {
+            return new ResolvedTarget(uri.LocalPath, false);
+        }
+
+        return new ResolvedTarget(Path.GetFullPath(input, context.WorkingDirectory.FullName), false);
     }
 
-    private static bool LooksLikeUrl(string input)
+    private static bool TryResolveHttpOrHttpsUrl(string input, out string url)
     {
+        url = input;
         return Uri.TryCreate(input, UriKind.Absolute, out var uri) &&
-            (uri.Scheme == Uri.UriSchemeHttp ||
-             uri.Scheme == Uri.UriSchemeHttps ||
-             uri.Scheme == Uri.UriSchemeFile);
+            (uri.Scheme == Uri.UriSchemeHttp || uri.Scheme == Uri.UriSchemeHttps);
     }
+
+    private sealed record ResolvedTarget(string Target, bool IsUrl);
 }
