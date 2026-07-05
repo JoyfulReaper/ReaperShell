@@ -118,6 +118,12 @@ internal static class Program
         registry.RegisterBuiltIn(new LsCommand());
         registry.RegisterBuiltIn(new CdCommand());
         registry.RegisterBuiltIn(new CatCommand());
+        registry.RegisterBuiltIn(new EchoCommand());
+        registry.RegisterBuiltIn(new MkdirCommand());
+        registry.RegisterBuiltIn(new TouchCommand());
+        registry.RegisterBuiltIn(new RmCommand());
+        registry.RegisterBuiltIn(new CpCommand());
+        registry.RegisterBuiltIn(new MvCommand());
         registry.RegisterBuiltIn(new AliasCommand(settings, registry, stateDirectory));
         registry.RegisterBuiltIn(new RitualCommand(host, stateDirectory));
         registry.RegisterBuiltIn(new HookCommand(settings, stateDirectory));
