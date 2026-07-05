@@ -222,15 +222,7 @@ public sealed class CommandCommand : IShellCommand
 
     private static List<string> GetCommandProjects(string commandsRoot)
     {
-        if (!Directory.Exists(commandsRoot))
-        {
-            return [];
-        }
-
-        return Directory.GetFiles(commandsRoot, "*.csproj", SearchOption.AllDirectories)
-            .Select(path => CommandPackPathResolver.EnsurePathWithinRoot(commandsRoot, path, "Command project path"))
-            .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
-            .ToList();
+        return CommandProjectDiscovery.DiscoverProjects(commandsRoot);
     }
 
     private bool TryValidateCommandName(

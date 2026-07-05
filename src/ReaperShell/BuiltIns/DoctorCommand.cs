@@ -306,6 +306,7 @@ public sealed class DoctorCommand : IShellCommand
     {
         report.Ok($"Registered command count: {_commandRegistry.GetCommandCount()}");
         report.Ok($"Alias count: {_settings.Aliases.Count}");
+        report.Ok($"External command mode: {_settings.ExternalCommandMode}");
 
         var aliasCycles = FindAliasCycles();
         if (aliasCycles.Count == 0)

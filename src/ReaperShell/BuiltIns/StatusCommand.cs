@@ -42,6 +42,7 @@ public sealed class StatusCommand : IShellCommand
         context.WriteLine($"LOADED PACKS: {_commandPackManager.LoadedPacks.Count}");
         context.WriteLine($"REGISTERED COMMANDS: {_commandRegistry.GetCommandCount()}");
         context.WriteLine($"ALIASES: {_settings.Aliases.Count}");
+        context.WriteLine($"EXTERNAL COMMAND MODE: {_settings.ExternalCommandMode}");
         context.WriteLine($"WATCHED REPOS: {_watchService.WatchedRepoCount}");
         context.WriteLine($"CONFIGURED HOOKS: {_settings.Hooks.Values.Sum(rituals => rituals?.Count ?? 0)}");
         return Task.FromResult(0);
