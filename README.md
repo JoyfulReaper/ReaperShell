@@ -172,6 +172,7 @@ Git-backed workflows:
 - `repo commit <name> "message"` stages and commits changes
 - `repo push <name>` pushes the repo
 - `repo save <name> "message"` commits and then pushes
+- `repo publish <name> <owner/repo> [--private|--public]` creates a GitHub repo with `gh repo create`, using `gh auth login` first
 
 Bulk operations:
 
