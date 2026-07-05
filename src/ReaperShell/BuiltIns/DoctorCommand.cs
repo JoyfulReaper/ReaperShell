@@ -157,6 +157,15 @@ public sealed class DoctorCommand : IShellCommand
             "dotnet executable is unavailable.",
             cancellationToken);
 
+        await CheckExecutableAsync(
+            report,
+            context,
+            "gh",
+            ["--version"],
+            "gh executable is available.",
+            "gh executable is unavailable.",
+            cancellationToken);
+
         var editorCommand = await _editorLauncher.ResolveEditorCommandAsync(context, cancellationToken);
         if (editorCommand is not null)
         {
