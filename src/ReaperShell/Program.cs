@@ -152,7 +152,7 @@ internal static class Program
         registry.RegisterBuiltIn(new CommandCommand(settings, workspaceRoot));
         registry.RegisterBuiltIn(new WhichCommand(settings, registry));
         registry.RegisterBuiltIn(new DescribeCommand(settings, registry));
-        registry.RegisterBuiltIn(new EditCommand(editorLauncher));
+        registry.RegisterBuiltIn(new EditCommand(settings, editorLauncher));
         registry.RegisterBuiltIn(new SourceCommand(settings, registry, editorLauncher, workspaceRoot));
         registry.RegisterBuiltIn(new BannerCommand());
         registry.RegisterBuiltIn(new StatusCommand(settings, registry, commandPackManager, watchService, stateDirectory));
