@@ -40,6 +40,16 @@ internal static class FileSystemCommandHelpers
         return PathComparisonHelper.PathsEqual(leftPath, rightPath);
     }
 
+    public static bool IsReparsePointDirectory(string path)
+    {
+        if (!Directory.Exists(path))
+        {
+            return false;
+        }
+
+        return (new DirectoryInfo(path).Attributes & FileAttributes.ReparsePoint) != 0;
+    }
+
     public static void CopyDirectoryRecursive(string sourceDirectory, string destinationDirectory, bool overwriteFiles)
     {
         Directory.CreateDirectory(destinationDirectory);

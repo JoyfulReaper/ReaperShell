@@ -71,6 +71,12 @@ public sealed class CpCommand : IShellCommand
                     return Task.FromResult(1);
                 }
 
+                if (FileSystemCommandHelpers.IsReparsePointDirectory(sourcePath))
+                {
+                    context.WriteErrorLine($"Cannot recursively copy reparse-point directory: {sourcePath}");
+                    return Task.FromResult(1);
+                }
+
                 return Task.FromResult(CopyDirectory(context, sourcePath, destinationPath));
             }
 

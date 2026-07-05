@@ -5,13 +5,30 @@ using Xunit;
 
 namespace ReaperShell.Tests;
 
-public sealed class FileSystemCommandsTests
+public sealed class FileSystemCommandsTests : IDisposable
 {
     private readonly string _root = Path.Combine(Path.GetTempPath(), "ReaperShell.FileSystemCommandsTests", Guid.NewGuid().ToString("N"));
 
     public FileSystemCommandsTests()
     {
         Directory.CreateDirectory(_root);
+    }
+
+    public void Dispose()
+    {
+        if (!Directory.Exists(_root))
+        {
+            return;
+        }
+
+        try
+        {
+            Directory.Delete(_root, recursive: true);
+        }
+        catch
+        {
+            // Best effort cleanup only.
+        }
     }
 
     [Fact]
@@ -201,6 +218,28 @@ public sealed class FileSystemCommandsTests
         Assert.True(File.Exists(Path.Combine(destinationRoot, "kept.txt")));
         Assert.False(Directory.Exists(Path.Combine(destinationRoot, "linked")));
         Assert.False(File.Exists(Path.Combine(destinationRoot, "linked", "outside.txt")));
+    }
+
+    [Fact]
+    public async Task CpRecursiveRejectsReparsePointSourceDirectoryWhenSupported()
+    {
+        var sourceTarget = Path.Combine(_root, "reparse-source-target");
+        var sourceLink = Path.Combine(_root, "reparse-source-link");
+        var destinationRoot = Path.Combine(_root, "reparse-source-copy");
+
+        Directory.CreateDirectory(sourceTarget);
+        await File.WriteAllTextAsync(Path.Combine(sourceTarget, "inside.txt"), "inside");
+
+        if (!TryCreateDirectorySymbolicLink(sourceLink, sourceTarget))
+        {
+            return;
+        }
+
+        var result = await ExecuteAsync(new CpCommand(), ["-r", "reparse-source-link", "reparse-source-copy"]);
+
+        Assert.Equal(1, result.ExitCode);
+        Assert.Contains("Cannot recursively copy reparse-point directory", result.StdErr);
+        Assert.False(Directory.Exists(destinationRoot));
     }
 
     [Fact]
