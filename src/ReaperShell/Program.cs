@@ -22,10 +22,21 @@ internal static class Program
             return 0;
         }
 
-        var workspaceRoot = Environment.CurrentDirectory;
+        string workspaceRoot;
+        try
+        {
+            workspaceRoot = WorkspaceRootResolver.FindWorkspaceRoot();
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine(ex.Message);
+            return 1;
+        }
+
+        var workingDirectory = Environment.CurrentDirectory;
         var stateDirectory = Path.GetFullPath(
-            options.StateDirectory ?? Path.Combine(workspaceRoot, ".rsh"),
-            workspaceRoot);
+            options.StateDirectory ?? Path.Combine(workingDirectory, ".rsh"),
+            workingDirectory);
         var settings = await LoadSettingsAsync(stateDirectory);
 
         var parser = new CommandParser();
@@ -54,7 +65,7 @@ internal static class Program
         var context = new ShellContext(
             Console.Out,
             Console.Error,
-            new DirectoryInfo(workspaceRoot),
+            new DirectoryInfo(workingDirectory),
             services: null,
             cancellationToken: CancellationToken.None);
 
@@ -65,11 +76,11 @@ internal static class Program
             (options.ProfilePath is not null || options.ScriptPath is null && options.CommandText is null);
         var profilePath = options.ProfilePath is null
             ? defaultProfilePath
-            : Path.GetFullPath(options.ProfilePath, workspaceRoot);
+            : Path.GetFullPath(options.ProfilePath, workingDirectory);
 
         if (options.ScriptPath is not null)
         {
-            var scriptPath = Path.GetFullPath(options.ScriptPath, workspaceRoot);
+            var scriptPath = Path.GetFullPath(options.ScriptPath, workingDirectory);
             if (shouldRunProfile &&
                 !await TryRunProfileAsync(host, context, profilePath, options.ProfilePath is not null))
             {
@@ -138,10 +149,10 @@ internal static class Program
         registry.RegisterBuiltIn(new AliasCommand(settings, registry, stateDirectory));
         registry.RegisterBuiltIn(new RitualCommand(host, stateDirectory));
         registry.RegisterBuiltIn(new HookCommand(settings, stateDirectory));
-        registry.RegisterBuiltIn(new CommandCommand(settings, workspaceRoot));
+        registry.RegisterBuiltIn(new CommandCommand(settings, commandPackManager, workspaceRoot));
         registry.RegisterBuiltIn(new WhichCommand(settings, registry));
         registry.RegisterBuiltIn(new DescribeCommand(settings, registry));
-        registry.RegisterBuiltIn(new EditCommand(editorLauncher));
+        registry.RegisterBuiltIn(new EditCommand(settings, editorLauncher));
         registry.RegisterBuiltIn(new SourceCommand(settings, registry, editorLauncher, workspaceRoot));
         registry.RegisterBuiltIn(new BannerCommand());
         registry.RegisterBuiltIn(new StatusCommand(settings, registry, commandPackManager, watchService, stateDirectory));

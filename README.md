@@ -211,6 +211,9 @@ ReaperShell can scaffold new commands inside an existing pack:
 - `command new <repo> <name> --language csharp`
 - `command new <repo> <name> --language fsharp`
 - `command new <repo> <name> --language vb`
+- `command remove <repo> <name>`
+- `command delete <repo> <name>`
+- `command rm <repo> <name>`
 
 C# is the default language. Supported aliases include `cs` and `c#` for C#, `fs` and `f#` for F#, and `vbnet`, `visualbasic`, and `visual-basic` for VB.NET.
 
@@ -392,6 +395,12 @@ Use `repo status` when unsure what changed:
 
 ```text
 rsh> repo status tools
+```
+
+After deleting a command from a loaded repo, run:
+
+```text
+rsh> repo reload tools
 ```
 
 ## Profiles, Aliases, Rituals, and Hooks
