@@ -11,11 +11,13 @@ public sealed class CommandCommand : IShellCommand
     private static readonly string[] LanguageNames = ["csharp", "fsharp", "vb"];
 
     private readonly ShellSettings _settings;
+    private readonly CommandPackManager _commandPackManager;
     private readonly string _workspaceRoot;
 
-    public CommandCommand(ShellSettings settings, string workspaceRoot)
+    public CommandCommand(ShellSettings settings, CommandPackManager commandPackManager, string workspaceRoot)
     {
         _settings = settings;
+        _commandPackManager = commandPackManager;
         _workspaceRoot = workspaceRoot;
     }
 
@@ -38,6 +40,9 @@ public sealed class CommandCommand : IShellCommand
             "templates" => Task.FromResult(ListTemplates(context, args)),
             "list" => ListCommandsAsync(context, args, cancellationToken),
             "new" => CreateCommandAsync(context, args, cancellationToken),
+            "remove" => RemoveCommandAsync(context, args, cancellationToken),
+            "delete" => RemoveCommandAsync(context, args, cancellationToken),
+            "rm" => RemoveCommandAsync(context, args, cancellationToken),
             _ => Task.FromResult(WriteUsage(context))
         };
     }
@@ -162,6 +167,69 @@ public sealed class CommandCommand : IShellCommand
         return 0;
     }
 
+    private async Task<int> RemoveCommandAsync(
+        ShellContext context,
+        IReadOnlyList<string> args,
+        CancellationToken cancellationToken)
+    {
+        if (args.Count != 3)
+        {
+            context.WriteErrorLine(GetRemoveUsage());
+            return 1;
+        }
+
+        var repoName = args[1];
+        var commandName = args[2];
+        if (!TryValidateCommandName(commandName, context, out var validatedCommandName))
+        {
+            return 1;
+        }
+
+        var manifestResult = await LoadRepoManifestAsync(context, repoName, cancellationToken);
+        if (!manifestResult.Success)
+        {
+            return 1;
+        }
+
+        var repo = manifestResult.Repo!;
+        var manifest = manifestResult.Manifest!;
+        if (!TryResolveCommandsRoot(repo.LocalPath, manifest, context, out var commandsRoot))
+        {
+            return 1;
+        }
+
+        var commandDirectory = GetCommandDirectory(commandsRoot, validatedCommandName, context);
+        if (commandDirectory is null)
+        {
+            return 1;
+        }
+
+        if (!Directory.Exists(commandDirectory))
+        {
+            context.WriteErrorLine($"Command directory does not exist: {commandDirectory}");
+            return 1;
+        }
+
+        try
+        {
+            Directory.Delete(commandDirectory, recursive: true);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException)
+        {
+            context.WriteErrorLine($"Failed to remove command directory: {ex.Message}");
+            return 1;
+        }
+
+        context.WriteLine($"Removed command '{validatedCommandName}' from repo '{repo.Name}'.");
+        if (_commandPackManager.IsLoaded(repo.Name))
+        {
+            context.WriteLine(
+                $"Repo '{repo.Name}' is currently loaded. Run 'repo reload {repo.Name}' to update loaded commands.");
+        }
+
+        return 0;
+    }
+
     private async Task<RepoManifestLoadResult> LoadRepoManifestAsync(
         ShellContext context,
         string repoName,
@@ -235,6 +303,22 @@ public sealed class CommandCommand : IShellCommand
         {
             context.WriteErrorLine(ex.Message);
             return false;
+        }
+    }
+
+    private static string? GetCommandDirectory(string commandsRoot, string commandName, ShellContext context)
+    {
+        try
+        {
+            return CommandPackPathResolver.EnsurePathWithinRoot(
+                commandsRoot,
+                Path.Combine(commandsRoot, commandName),
+                "Command directory");
+        }
+        catch (Exception ex)
+        {
+            context.WriteErrorLine(ex.Message);
+            return null;
         }
     }
 
@@ -490,6 +574,11 @@ public sealed class CommandCommand : IShellCommand
     private static string GetNewUsage()
     {
         return "Usage: command new <repo> <command-name> [--template <basic|file|process>] [--language <csharp|fsharp|vb>]";
+    }
+
+    private static string GetRemoveUsage()
+    {
+        return "Usage: command <remove|delete|rm> <repo> <command-name>";
     }
 
     private static string GetBasicCSharpTemplateSource(string className, string commandName)
@@ -992,7 +1081,7 @@ End Namespace
 
     private static int WriteUsage(ShellContext context)
     {
-        context.WriteErrorLine("Usage: command <templates|list|new> ...");
+        context.WriteErrorLine("Usage: command <templates|list|new|remove|delete|rm> ...");
         return 1;
     }
 }
