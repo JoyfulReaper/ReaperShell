@@ -168,7 +168,7 @@ internal sealed class RepoGitService
                 $"Repo '{repo.Name}' has untracked files only. Continuing with branch switch; untracked files may remain.");
         }
 
-        if (snapshot.HasTrackedChanges && force)
+        if (force)
         {
             context.WriteLine("Force switch requested. Discarding tracked working tree changes. Untracked files may remain.");
         }
@@ -200,14 +200,7 @@ internal sealed class RepoGitService
             return 1;
         }
 
-        var result = await RunGitAsync(
-            repo.Name,
-            ["pull", "--ff-only"],
-            repo.LocalPath,
-            context,
-            cancellationToken);
-
-        return result.ExitCode;
+        return await PullRepoAsync(context, repo, cancellationToken);
     }
 
     public async Task<int> SyncAsync(
@@ -220,7 +213,7 @@ internal sealed class RepoGitService
             return 1;
         }
 
-        return await SyncRepoAsync(context, repo, cancellationToken);
+        return await PullRepoAsync(context, repo, cancellationToken);
     }
 
     public async Task<int> CommitAsync(
@@ -280,14 +273,14 @@ internal sealed class RepoGitService
             cancellationToken);
     }
 
-    internal async Task<int> SyncRepoAsync(
+    private async Task<int> PullRepoAsync(
         ShellContext context,
         CommandRepoSettings repo,
         CancellationToken cancellationToken)
     {
         if (!repo.IsGitRepo)
         {
-            context.WriteErrorLine("Sync only works for Git-backed repos.");
+            context.WriteErrorLine("This command only works for Git-backed repos.");
             return 1;
         }
 

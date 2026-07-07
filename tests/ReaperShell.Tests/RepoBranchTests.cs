@@ -282,7 +282,7 @@ public sealed class HelloCommand : IShellCommand
         var parser = new CommandParser();
         var host = new ShellHost(parser, registry, new ShellLifetime(), processRunner, settings, _stateDirectory, sessionState);
         var watchService = new ShellWatchService(host);
-        var commandPackManager = new CommandPackManager(registry, processRunner);
+        var commandPackManager = new CommandPackManager(registry, processRunner, _workspaceRoot);
         return new RepoCommand(settings, processRunner, commandPackManager, host, watchService, _workspaceRoot, _stateDirectory);
     }
 

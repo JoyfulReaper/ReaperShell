@@ -12,6 +12,7 @@ public sealed class RepoPublishTests : IAsyncLifetime
 {
     private readonly string _root = Path.Combine(Path.GetTempPath(), "ReaperShell.RepoPublishTests", Guid.NewGuid().ToString("N"));
     private readonly string _helperRoot = Path.Combine(Path.GetTempPath(), "ReaperShell.RepoPublishTests.gh", Guid.NewGuid().ToString("N"));
+    private readonly string _workspaceRoot = WorkspaceRootResolver.FindWorkspaceRoot();
     private string _ghExecutablePath = string.Empty;
     private string _gitExecutablePath = string.Empty;
 
@@ -443,7 +444,7 @@ return 0;
         var parser = new CommandParser();
         var host = new ShellHost(parser, registry, new ShellLifetime(), processRunner, settings, _root, sessionState);
         var watchService = new ShellWatchService(host);
-        var commandPackManager = new CommandPackManager(registry, processRunner);
+        var commandPackManager = new CommandPackManager(registry, processRunner, _workspaceRoot);
         return new RepoCommand(settings, processRunner, commandPackManager, host, watchService, _root, _root);
     }
 

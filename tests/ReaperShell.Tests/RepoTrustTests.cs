@@ -122,6 +122,7 @@ public sealed class RepoTrustTests : IAsyncLifetime
         Assert.Equal(1, CountProfileLoadLines(profilePath, "trust-autoload-profile"));
         Assert.Contains("will automatically load on startup", result.StdOut);
         Assert.Contains("Added 'repo load trust-autoload-profile' to profile", result.StdOut);
+        Assert.Contains("Note: --autoload loads before the profile. --profile adds a repo load command to profile.rsh.", result.StdOut);
     }
 
     [Fact]
@@ -280,7 +281,7 @@ public sealed class RepoTrustTests : IAsyncLifetime
         var parser = new CommandParser();
         var host = new ShellHost(parser, registry, new ShellLifetime(), processRunner, settings, _stateDirectory, sessionState);
         var watchService = new ShellWatchService(host);
-        var commandPackManager = new CommandPackManager(registry, processRunner);
+        var commandPackManager = new CommandPackManager(registry, processRunner, _workspaceRoot);
         return new RepoCommand(settings, processRunner, commandPackManager, host, watchService, _root, _stateDirectory);
     }
 
@@ -289,7 +290,7 @@ public sealed class RepoTrustTests : IAsyncLifetime
         var sessionState = new ShellSessionState();
         var processRunner = new ProcessRunner(sessionState);
         var registry = new CommandRegistry();
-        var commandPackManager = new CommandPackManager(registry, processRunner);
+        var commandPackManager = new CommandPackManager(registry, processRunner, _workspaceRoot);
         var stdout = new StringWriter();
         var stderr = new StringWriter();
         var context = new ShellContext(stdout, stderr, new DirectoryInfo(_root), services: null, CancellationToken.None);

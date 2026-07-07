@@ -240,6 +240,11 @@ internal sealed class RepoRegistryService
         {
             context.WriteLine($"'{repo.Name}' will automatically load on startup.");
         }
+
+        if (options.AutoLoad && options.Profile)
+        {
+            context.WriteLine("Note: --autoload loads before the profile. --profile adds a repo load command to profile.rsh.");
+        }
         else if (!options.LoadNow && !options.Profile)
         {
             context.WriteLine($"To load now: repo load {repo.Name}");
