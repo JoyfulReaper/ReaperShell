@@ -120,6 +120,17 @@ The commands below are currently registered by the shell. Syntax is kept close t
 | `cat` | Prints a text file. | `cat <file>` | `cat README.md` |
 | `echo` | Prints its arguments joined by spaces. | `echo [values...]` | `echo hello world` |
 
+Interactive mode supports simple Tab completion for file and directory paths relative to the current working directory.
+Interactive mode also shows the current shell working directory in the prompt by default, and the path updates after `cd`.
+
+Interactive output uses simple semantic colors by default when the shell is attached to a console:
+
+- green for success messages
+- yellow for warnings
+- red for errors
+
+Color output follows `ShellSettings.ColorMode`, and redirected output stays plain text.
+
 ### File Utilities
 
 | Command | Purpose | Syntax | Example |

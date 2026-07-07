@@ -232,8 +232,8 @@ internal sealed class RepoRegistryService
         }
 
         await SaveSettingsAsync(cancellationToken);
-        context.WriteLine("Trusted command packs execute arbitrary code on your machine and are not sandboxed.");
-        context.WriteLine("Only trust repos you control or have reviewed.");
+        context.WriteWarningLine("Trusted command packs execute arbitrary code on your machine and are not sandboxed.");
+        context.WriteWarningLine("Only trust repos you control or have reviewed.");
         context.WriteLine($"Marked '{repo.Name}' as trusted.");
 
         if (options.AutoLoad)

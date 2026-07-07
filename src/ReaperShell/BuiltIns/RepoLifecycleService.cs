@@ -332,7 +332,7 @@ internal sealed class RepoLifecycleService
 
         if (saveExitCode != 0)
         {
-            context.WriteErrorLine($"Reload succeeded but auto-sync failed for '{repo.Name}'.");
+            context.WriteWarningLine($"Reload succeeded but auto-sync failed for '{repo.Name}'.");
         }
 
         if (saveExitCode == 0)

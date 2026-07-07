@@ -112,7 +112,7 @@ public sealed class CommandPackManager
                 }
 
                 builtAssemblies.Add(assemblyPath);
-                context.WriteLine($"Build succeeded: {assemblyPath}");
+                context.WriteSuccessLine($"Build succeeded: {assemblyPath}");
             }
 
             return new CommandPackBuildResult(0, builtAssemblies);

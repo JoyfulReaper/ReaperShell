@@ -17,6 +17,7 @@ public sealed class ShellHost
     private readonly HashSet<string> _activeHookEvents = new(StringComparer.OrdinalIgnoreCase);
     private readonly ProcessRunner _processRunner;
     private readonly string _stateDirectory;
+    private readonly SemaphoreSlim _interactivePromptReady = new(0, 1);
     private readonly ShellSessionState _sessionState;
     private readonly ShellSettings _settings;
     private string? _currentProfilePath;
@@ -47,7 +48,6 @@ public sealed class ShellHost
         CancellationToken cancellationToken)
     {
         IsInteractiveModeEnabled = true;
-        _ = Task.Run(() => ReadInteractiveInputAsync(_interactiveWorkItems.Writer), CancellationToken.None);
 
         try
         {
@@ -61,9 +61,14 @@ public sealed class ShellHost
 
             await RunHookEventAsync(context, ShellHookEventNames.Startup, cancellationToken);
 
+            SignalInteractivePromptReady();
+
+            _ = Task.Run(
+                () => ReadInteractiveInputAsync(context, _interactiveWorkItems.Writer, cancellationToken),
+                CancellationToken.None);
+
             while (!_lifetime.ExitRequested && !cancellationToken.IsCancellationRequested)
             {
-                Console.Write("rsh> ");
                 var workItem = await _interactiveWorkItems.Reader.ReadAsync(cancellationToken);
 
                 if (workItem.QueuedCommand is not null)
@@ -89,6 +94,7 @@ public sealed class ShellHost
                     input,
                     new CommandExecutionOptions(EchoCommand: false, TriggerCommandHooks: true),
                     cancellationToken);
+                SignalInteractivePromptReady();
             }
 
             await RunHookEventAsync(context, ShellHookEventNames.ShellExit, cancellationToken);
@@ -273,7 +279,7 @@ public sealed class ShellHost
         {
             if (options.EchoCommand)
             {
-                context.WriteLine($"rsh> {input}");
+                context.WriteLine($"{FormatPrompt(context)}{input}");
             }
 
             var tokens = _commandParser.Parse(input);
@@ -516,14 +522,26 @@ public sealed class ShellHost
             string.Equals(resolvedTokens[0], "history", StringComparison.OrdinalIgnoreCase);
     }
 
-    private static async Task ReadInteractiveInputAsync(ChannelWriter<InteractiveWorkItem> writer)
+    private async Task ReadInteractiveInputAsync(
+        ShellContext context,
+        ChannelWriter<InteractiveWorkItem> writer,
+        CancellationToken cancellationToken)
     {
+        var lineReader = new InteractiveLineReader();
         try
         {
             while (true)
             {
-                var input = Console.ReadLine();
-                await writer.WriteAsync(new InteractiveWorkItem(input, null));
+                await _interactivePromptReady.WaitAsync(cancellationToken);
+                var prompt = FormatPrompt(context);
+                var input = await lineReader.ReadLineAsync(
+                    prompt,
+                    () => context.WorkingDirectory,
+                    () => _sessionState.GetHistory(),
+                    () => _commandRegistry.GetAllCommands(),
+                    () => _settings.Aliases.Keys.ToArray(),
+                    cancellationToken);
+                await writer.WriteAsync(new InteractiveWorkItem(input, null), cancellationToken);
                 if (input is null)
                 {
                     break;
@@ -534,6 +552,72 @@ public sealed class ShellHost
         {
             writer.TryComplete();
         }
+    }
+
+    private void SignalInteractivePromptReady()
+    {
+        if (_interactivePromptReady.CurrentCount == 0)
+        {
+            _interactivePromptReady.Release();
+        }
+    }
+
+    internal string FormatPrompt(ShellContext context)
+    {
+        if (!_settings.ShowPathInPrompt)
+        {
+            return "rsh> ";
+        }
+
+        return FormatPrompt(context.WorkingDirectory.FullName);
+    }
+
+    internal static string FormatPrompt(string workingDirectory)
+    {
+        if (string.IsNullOrWhiteSpace(workingDirectory))
+        {
+            return "rsh> ";
+        }
+
+        var displayPath = AbbreviateHomeDirectory(workingDirectory);
+        return displayPath + "> ";
+    }
+
+    private static string AbbreviateHomeDirectory(string workingDirectory)
+    {
+        var homeDirectory = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        if (string.IsNullOrWhiteSpace(homeDirectory))
+        {
+            return workingDirectory;
+        }
+
+        var comparison = OperatingSystem.IsWindows()
+            ? StringComparison.OrdinalIgnoreCase
+            : StringComparison.Ordinal;
+
+        if (string.Equals(workingDirectory, homeDirectory, comparison))
+        {
+            return "~";
+        }
+
+        var normalizedHome = homeDirectory.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        if (!workingDirectory.StartsWith(normalizedHome, comparison))
+        {
+            return workingDirectory;
+        }
+
+        var suffix = workingDirectory[normalizedHome.Length..];
+        if (suffix.Length == 0)
+        {
+            return "~";
+        }
+
+        if (suffix[0] != Path.DirectorySeparatorChar && suffix[0] != Path.AltDirectorySeparatorChar)
+        {
+            return workingDirectory;
+        }
+
+        return "~" + suffix;
     }
 }
 

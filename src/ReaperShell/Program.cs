@@ -67,7 +67,8 @@ internal static class Program
             Console.Error,
             new DirectoryInfo(workingDirectory),
             services: null,
-            cancellationToken: CancellationToken.None);
+            cancellationToken: CancellationToken.None,
+            colorMode: settings.ColorMode);
 
         var defaultProfilePath = Path.Combine(stateDirectory, "profile.rsh");
         await EnsureDefaultProfileExistsAsync(defaultProfilePath);

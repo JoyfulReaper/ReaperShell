@@ -288,6 +288,10 @@ return 0;
                 {
                     // The helper may still be writing the capture file; retry briefly.
                 }
+                catch (JsonException)
+                {
+                    // The helper may still be writing the capture file; retry briefly.
+                }
             }
 
             await Task.Delay(50);
