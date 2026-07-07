@@ -177,6 +177,8 @@ internal sealed class RepoPublishService
 
         if (!hasCommit)
         {
+            await RepoScaffolder.EnsureDefaultGitIgnoreAsync(repo.LocalPath, cancellationToken);
+
             var branchResult = await RunGitAsync(
                 gitExecutable,
                 ["branch", "-M", "main"],

@@ -148,6 +148,7 @@ return 0;
         Assert.Contains("already Git-backed", result.StdErr);
         Assert.Contains("repo push", result.StdErr);
         Assert.Contains("repo save", result.StdErr);
+        Assert.False(File.Exists(Path.Combine(settings.Repos["local-repo"].LocalPath, ".gitignore")));
     }
 
     [Fact]
@@ -174,6 +175,12 @@ return 0;
     public async Task PublishBootstrapsNonGitPackBeforeGh()
     {
         var settings = await CreateSettingsAsync("local-repo");
+        var repoRoot = settings.Repos["local-repo"].LocalPath;
+        Directory.CreateDirectory(Path.Combine(repoRoot, "bin", "Debug", "net10.0"));
+        Directory.CreateDirectory(Path.Combine(repoRoot, "obj", "Debug", "net10.0"));
+        await File.WriteAllTextAsync(Path.Combine(repoRoot, "bin", "Debug", "net10.0", "artifact.dll"), "binary");
+        await File.WriteAllTextAsync(Path.Combine(repoRoot, "obj", "Debug", "net10.0", "artifact.obj"), "obj");
+
         var captureFile = Path.Combine(_root, "gh-capture-non-git.jsonl");
         using var environment = CreatePublishEnvironmentScope(captureFile);
 
@@ -183,8 +190,14 @@ return 0;
         Assert.Contains("Published repo 'local-repo' to octocat/widget.", result.StdOut);
         Assert.True(settings.Repos["local-repo"].IsGitRepo);
         Assert.Equal("octocat/widget", settings.Repos["local-repo"].Source);
-        Assert.True(Directory.Exists(Path.Combine(settings.Repos["local-repo"].LocalPath, ".git")));
-        Assert.Equal("1", (await RunGitAsync(settings.Repos["local-repo"].LocalPath, "rev-list", "--count", "HEAD")).StdOut.Trim());
+        Assert.True(Directory.Exists(Path.Combine(repoRoot, ".git")));
+        Assert.True(File.Exists(Path.Combine(repoRoot, ".gitignore")));
+        Assert.Equal("1", (await RunGitAsync(repoRoot, "rev-list", "--count", "HEAD")).StdOut.Trim());
+
+        var trackedFiles = (await RunGitAsync(repoRoot, "ls-files")).StdOut;
+        Assert.Contains(".gitignore", trackedFiles, StringComparison.Ordinal);
+        Assert.DoesNotContain("bin/Debug/net10.0/artifact.dll", trackedFiles, StringComparison.Ordinal);
+        Assert.DoesNotContain("obj/Debug/net10.0/artifact.obj", trackedFiles, StringComparison.Ordinal);
 
         var capture = ReadCaptureLines(captureFile);
         Assert.Single(capture);
@@ -194,7 +207,7 @@ return 0;
             "create",
             "octocat/widget",
             "--source",
-            settings.Repos["local-repo"].LocalPath,
+            repoRoot,
             "--push",
             "--public",
             "--remote",

@@ -11,6 +11,7 @@ internal static class RepoScaffolder
         CancellationToken cancellationToken)
     {
         Directory.CreateDirectory(repoRoot);
+        await EnsureDefaultGitIgnoreAsync(repoRoot, cancellationToken);
         Directory.CreateDirectory(Path.Combine(repoRoot, "commands", "hello"));
 
         var manifest = new CommandPackManifest
@@ -32,6 +33,31 @@ internal static class RepoScaffolder
             Path.Combine(repoRoot, "commands", "hello", "HelloCommand.cs"),
             GetGeneratedCommandContents(),
             cancellationToken);
+    }
+
+    public static async Task EnsureDefaultGitIgnoreAsync(string repoRoot, CancellationToken cancellationToken)
+    {
+        var gitIgnorePath = Path.Combine(repoRoot, ".gitignore");
+        if (File.Exists(gitIgnorePath))
+        {
+            return;
+        }
+
+        await File.WriteAllTextAsync(gitIgnorePath, GetDefaultGitIgnoreContents(), cancellationToken);
+    }
+
+    public static string GetDefaultGitIgnoreContents()
+    {
+        return """
+bin/
+obj/
+.vs/
+*.user
+*.suo
+TestResults/
+*.nupkg
+*.snupkg
+""";
     }
 
     private static string GetGeneratedProjectFileContents(string repoRoot, string workspaceRoot)
