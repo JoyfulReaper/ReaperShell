@@ -155,16 +155,22 @@ internal sealed class RepoGitService
             return 1;
         }
 
-        if (snapshot.IsDirty && !force)
+        if (snapshot.HasTrackedChanges && !force)
         {
             context.WriteErrorLine(
-                $"Repo '{repo.Name}' has uncommitted changes. Use --force to discard tracked changes before switching branches.");
+                $"Repo '{repo.Name}' has tracked working tree changes. Use --force to discard tracked changes before switching branches. Untracked files may remain.");
             return 1;
         }
 
-        if (snapshot.IsDirty && force)
+        if (!snapshot.HasTrackedChanges && snapshot.HasUntrackedChanges && !force)
         {
-            context.WriteLine("Force switch requested. Discarding tracked working tree changes.");
+            context.WriteLine(
+                $"Repo '{repo.Name}' has untracked files only. Continuing with branch switch; untracked files may remain.");
+        }
+
+        if (snapshot.HasTrackedChanges && force)
+        {
+            context.WriteLine("Force switch requested. Discarding tracked working tree changes. Untracked files may remain.");
         }
 
         var switchArguments = BuildSwitchArguments(switchPlan, force);
@@ -287,7 +293,7 @@ internal sealed class RepoGitService
 
         var result = await RunGitAsync(
             repo.Name,
-            ["pull", "--rebase"],
+            ["pull", "--ff-only"],
             repo.LocalPath,
             context,
             cancellationToken);
@@ -652,6 +658,11 @@ internal sealed class RepoGitService
             return null;
         }
 
+        var statusLines = statusResult.StandardOutput
+            .Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        var hasTrackedChanges = statusLines.Any(line => !line.StartsWith("??", StringComparison.Ordinal));
+        var hasUntrackedChanges = statusLines.Any(line => line.StartsWith("??", StringComparison.Ordinal));
+
         var localBranches = await ReadGitLinesAsync(
             repo,
             context,
@@ -682,7 +693,9 @@ internal sealed class RepoGitService
             currentBranch,
             upstreamBranch,
             shortSha,
-            !string.IsNullOrWhiteSpace(statusResult.StandardOutput),
+            statusLines.Length > 0,
+            hasTrackedChanges,
+            hasUntrackedChanges,
             localBranches,
             filteredRemoteBranches,
             defaultRemoteBranch);
@@ -769,6 +782,8 @@ internal sealed record GitRepositorySnapshot(
     string? UpstreamBranch,
     string ShortCommitSha,
     bool IsDirty,
+    bool HasTrackedChanges,
+    bool HasUntrackedChanges,
     IReadOnlyList<string> LocalBranches,
     IReadOnlyList<string> RemoteBranches,
     string? DefaultRemoteBranch)

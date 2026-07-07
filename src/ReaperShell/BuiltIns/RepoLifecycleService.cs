@@ -297,17 +297,6 @@ internal sealed class RepoLifecycleService
             return unloadExitCode;
         }
 
-        if (repo.IsGitRepo)
-        {
-            var syncExitCode = await _gitService.SyncRepoAsync(context, repo, cancellationToken);
-            if (syncExitCode != 0)
-            {
-                context.WriteErrorLine($"Reload failed while syncing '{repo.Name}'.");
-                await _shellHost.RunHookEventAsync(context, ShellHookEventNames.RepoReloadFailed, cancellationToken);
-                return syncExitCode;
-            }
-        }
-
         var buildExitCode = await BuildRepoAsync(context, repo, cancellationToken);
         if (buildExitCode != 0)
         {

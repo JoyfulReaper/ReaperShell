@@ -92,6 +92,32 @@ public sealed class RepoBranchTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task ReloadDoesNotPullOrRebaseAutomatically()
+    {
+        var harness = await CreateBranchHarnessAsync("iis-tools");
+
+        var switchResult = await RunRepoAsync(harness.RepoCommand, "switch", "iis-tools", "dev");
+        Assert.Equal(0, switchResult.ExitCode);
+
+        var beforeReloadCommit = (await RunGitAsync(harness.RepoRoot, "rev-parse", "HEAD")).StdOut.Trim();
+        await AdvanceRemoteBranchAsync(
+            harness.RemoteRoot,
+            "dev",
+            "Hello from a dev branch.",
+            "Hello from a remote dev branch.",
+            "Advance dev branch");
+
+        var reloadResult = await RunRepoAsync(harness.RepoCommand, "reload", "iis-tools");
+        var afterReloadCommit = (await RunGitAsync(harness.RepoRoot, "rev-parse", "HEAD")).StdOut.Trim();
+
+        Assert.Equal(0, reloadResult.ExitCode);
+        Assert.Equal(beforeReloadCommit, afterReloadCommit);
+        Assert.Contains("Repo: iis-tools", reloadResult.StdOut);
+        Assert.Contains("Branch: dev", reloadResult.StdOut);
+        Assert.Contains("Commit:", reloadResult.StdOut);
+    }
+
+    [Fact]
     public async Task SwitchRefusesDirtyTreeUnlessForced()
     {
         var harness = await CreateBranchHarnessAsync("iis-tools");
@@ -123,7 +149,7 @@ public sealed class HelloCommand : IShellCommand
         var branchBeforeForce = (await RunGitAsync(harness.RepoRoot, "rev-parse", "--abbrev-ref", "HEAD")).StdOut.Trim();
 
         Assert.Equal(1, refused.ExitCode);
-        Assert.Contains("uncommitted changes", refused.StdErr, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("tracked working tree changes", refused.StdErr, StringComparison.OrdinalIgnoreCase);
         Assert.Equal(0, status.ExitCode);
         Assert.Contains("Branch:", status.StdOut);
         Assert.Contains("Dirty: yes", status.StdOut);
@@ -131,9 +157,25 @@ public sealed class HelloCommand : IShellCommand
 
         var forced = await RunRepoAsync(harness.RepoCommand, "switch", "iis-tools", "dev", "--force");
         Assert.Equal(0, forced.ExitCode);
-        Assert.Contains("Force switch requested", forced.StdOut);
+        Assert.Contains("Force switch requested. Discarding tracked working tree changes. Untracked files may remain.", forced.StdOut);
         Assert.Contains("Branch: dev", (await RunRepoAsync(harness.RepoCommand, "status", "iis-tools")).StdOut);
         Assert.Contains("Hello from a dev branch.", await File.ReadAllTextAsync(commandSourcePath));
+    }
+
+    [Fact]
+    public async Task SwitchAllowsUntrackedOnlyWithoutForce()
+    {
+        var harness = await CreateBranchHarnessAsync("iis-tools");
+        var untrackedFilePath = Path.Combine(harness.RepoRoot, "notes.txt");
+        await File.WriteAllTextAsync(untrackedFilePath, "temporary notes");
+
+        var result = await RunRepoAsync(harness.RepoCommand, "switch", "iis-tools", "dev");
+        var status = await RunRepoAsync(harness.RepoCommand, "status", "iis-tools");
+
+        Assert.Equal(0, result.ExitCode);
+        Assert.Contains("untracked files only", result.StdOut, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Branch: dev", status.StdOut);
+        Assert.True(File.Exists(untrackedFilePath));
     }
 
     [Fact]
@@ -163,6 +205,32 @@ public sealed class HelloCommand : IShellCommand
 
         Assert.Equal(0, pullResult.ExitCode);
         Assert.NotEqual(beforeCommit, afterCommit);
+    }
+
+    [Fact]
+    public async Task SyncUsesFastForwardOnly()
+    {
+        var harness = await CreateBranchHarnessAsync("iis-tools");
+
+        var commandSourcePath = Path.Combine(harness.RepoRoot, "commands", "hello", "HelloCommand.cs");
+        var originalCommandSource = await File.ReadAllTextAsync(commandSourcePath);
+        await File.WriteAllTextAsync(
+            commandSourcePath,
+            originalCommandSource.Replace(
+                "Hello from a live-loaded ReaperShell command.",
+                "Hello from a local branch commit."));
+
+        await RunGitAsync(harness.RepoRoot, "add", ".");
+        await RunGitAsync(harness.RepoRoot, "commit", "-m", "Local main branch changes");
+        var beforeSyncCommit = (await RunGitAsync(harness.RepoRoot, "rev-parse", "--short", "HEAD")).StdOut.Trim();
+
+        await AdvanceRemoteMainAsync(harness.RemoteRoot);
+
+        var syncResult = await RunRepoAsync(harness.RepoCommand, "sync", "iis-tools");
+        var afterSyncCommit = (await RunGitAsync(harness.RepoRoot, "rev-parse", "--short", "HEAD")).StdOut.Trim();
+
+        Assert.NotEqual(0, syncResult.ExitCode);
+        Assert.Equal(beforeSyncCommit, afterSyncCommit);
     }
 
     private async Task<BranchHarness> CreateBranchHarnessAsync(string repoName)
@@ -232,19 +300,39 @@ public sealed class HelloCommand : IShellCommand
 
     private async Task AdvanceRemoteMainAsync(string remoteRoot)
     {
+        await AdvanceRemoteBranchAsync(
+            remoteRoot,
+            "main",
+            "Hello from a live-loaded ReaperShell command.",
+            "Hello from a fast-forwarded branch.",
+            "Advance main branch");
+    }
+
+    private async Task AdvanceRemoteBranchAsync(
+        string remoteRoot,
+        string branchName,
+        string sourceText,
+        string replacementText,
+        string commitMessage)
+    {
         var cloneParent = Path.Combine(_root, "remote-clone-parent");
         var cloneRoot = Path.Combine(cloneParent, "clone");
         Directory.CreateDirectory(cloneParent);
         await RunGitAsync(cloneParent, "clone", remoteRoot, cloneRoot);
 
+        if (!string.Equals(branchName, "main", StringComparison.OrdinalIgnoreCase))
+        {
+            await RunGitAsync(cloneRoot, "switch", "--track", $"origin/{branchName}");
+        }
+
         var commandSourcePath = Path.Combine(cloneRoot, "commands", "hello", "HelloCommand.cs");
         var source = await File.ReadAllTextAsync(commandSourcePath);
         await File.WriteAllTextAsync(
             commandSourcePath,
-            source.Replace("Hello from a live-loaded ReaperShell command.", "Hello from a fast-forwarded branch."));
+            source.Replace(sourceText, replacementText));
 
         await RunGitAsync(cloneRoot, "add", ".");
-        await RunGitAsync(cloneRoot, "commit", "-m", "Advance main branch");
+        await RunGitAsync(cloneRoot, "commit", "-m", commitMessage);
         await RunGitAsync(cloneRoot, "push");
     }
 
