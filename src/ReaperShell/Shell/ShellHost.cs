@@ -47,7 +47,9 @@ public sealed class ShellHost
         CancellationToken cancellationToken)
     {
         IsInteractiveModeEnabled = true;
-        _ = Task.Run(() => ReadInteractiveInputAsync(_interactiveWorkItems.Writer), CancellationToken.None);
+        _ = Task.Run(
+            () => ReadInteractiveInputAsync(context, _interactiveWorkItems.Writer),
+            CancellationToken.None);
 
         try
         {
@@ -63,7 +65,6 @@ public sealed class ShellHost
 
             while (!_lifetime.ExitRequested && !cancellationToken.IsCancellationRequested)
             {
-                Console.Write("rsh> ");
                 var workItem = await _interactiveWorkItems.Reader.ReadAsync(cancellationToken);
 
                 if (workItem.QueuedCommand is not null)
@@ -516,13 +517,17 @@ public sealed class ShellHost
             string.Equals(resolvedTokens[0], "history", StringComparison.OrdinalIgnoreCase);
     }
 
-    private static async Task ReadInteractiveInputAsync(ChannelWriter<InteractiveWorkItem> writer)
+    private async Task ReadInteractiveInputAsync(
+        ShellContext context,
+        ChannelWriter<InteractiveWorkItem> writer)
     {
+        var lineReader = new InteractiveLineReader();
         try
         {
             while (true)
             {
-                var input = Console.ReadLine();
+                var prompt = FormatPrompt(context);
+                var input = await lineReader.ReadLineAsync(prompt, () => context.WorkingDirectory);
                 await writer.WriteAsync(new InteractiveWorkItem(input, null));
                 if (input is null)
                 {
@@ -534,6 +539,64 @@ public sealed class ShellHost
         {
             writer.TryComplete();
         }
+    }
+
+    internal string FormatPrompt(ShellContext context)
+    {
+        if (!_settings.ShowPathInPrompt)
+        {
+            return "rsh> ";
+        }
+
+        return FormatPrompt(context.WorkingDirectory.FullName);
+    }
+
+    internal static string FormatPrompt(string workingDirectory)
+    {
+        if (string.IsNullOrWhiteSpace(workingDirectory))
+        {
+            return "rsh> ";
+        }
+
+        var displayPath = AbbreviateHomeDirectory(workingDirectory);
+        return displayPath + "> ";
+    }
+
+    private static string AbbreviateHomeDirectory(string workingDirectory)
+    {
+        var homeDirectory = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        if (string.IsNullOrWhiteSpace(homeDirectory))
+        {
+            return workingDirectory;
+        }
+
+        var comparison = OperatingSystem.IsWindows()
+            ? StringComparison.OrdinalIgnoreCase
+            : StringComparison.Ordinal;
+
+        if (string.Equals(workingDirectory, homeDirectory, comparison))
+        {
+            return "~";
+        }
+
+        var normalizedHome = homeDirectory.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        if (!workingDirectory.StartsWith(normalizedHome, comparison))
+        {
+            return workingDirectory;
+        }
+
+        var suffix = workingDirectory[normalizedHome.Length..];
+        if (suffix.Length == 0)
+        {
+            return "~";
+        }
+
+        if (suffix[0] != Path.DirectorySeparatorChar && suffix[0] != Path.AltDirectorySeparatorChar)
+        {
+            return workingDirectory;
+        }
+
+        return "~" + suffix;
     }
 }
 

@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using ReaperShell.Abstractions;
 
 namespace ReaperShell.Shell;
 
@@ -24,9 +25,14 @@ public sealed class ShellSettings
     [JsonConverter(typeof(JsonStringEnumConverter))]
     public ExternalCommandMode ExternalCommandMode { get; set; } = ExternalCommandMode.PathOnly;
 
+    [JsonConverter(typeof(JsonStringEnumConverter))]
+    public ShellColorMode ColorMode { get; set; } = ShellColorMode.Auto;
+
     public string DefaultConfiguration { get; set; } = "Debug";
 
     public string? EditorCommand { get; set; }
+
+    public bool ShowPathInPrompt { get; set; } = true;
 
     public static async Task<ShellSettings> LoadOrCreateAsync(
         string stateDirectory,
@@ -104,6 +110,11 @@ public sealed class ShellSettings
             ExternalCommandMode = ExternalCommandMode.PathOnly;
         }
 
+        if (!Enum.IsDefined(typeof(global::ReaperShell.Abstractions.ShellColorMode), ColorMode))
+        {
+            ColorMode = ShellColorMode.Auto;
+        }
+
         return this;
     }
 
@@ -113,8 +124,10 @@ public sealed class ShellSettings
         Aliases = source.Aliases;
         Hooks = source.Hooks;
         ExternalCommandMode = source.ExternalCommandMode;
+        ColorMode = source.ColorMode;
         DefaultConfiguration = source.DefaultConfiguration;
         EditorCommand = source.EditorCommand;
+        ShowPathInPrompt = source.ShowPathInPrompt;
     }
 }
 
