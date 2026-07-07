@@ -12,6 +12,7 @@ internal sealed class RepoRegistryService
     private readonly ShellWatchService _watchService;
     private readonly string _stateDirectory;
     private readonly string _workspaceRoot;
+    private Func<ShellContext, CommandRepoSettings, CancellationToken, Task<int>>? _loadRepoAction;
 
     public RepoRegistryService(
         ShellSettings settings,
@@ -142,10 +143,11 @@ internal sealed class RepoRegistryService
         {
             var loadedState = _commandPackManager.IsLoaded(repo.Name) ? "loaded" : "unloaded";
             var trustState = repo.Trusted ? "trusted" : "untrusted";
+            var autoLoadState = repo.AutoLoad ? "autoload=on" : "autoload=off";
             var gitState = repo.IsGitRepo ? "git" : "local";
             var autoSyncState = repo.AutoSyncOnSuccessfulReload ? "autosync=on" : "autosync=off";
             context.WriteLine(
-                $"{repo.Name} | {gitState} | {trustState} | {loadedState} | {autoSyncState} | {repo.LocalPath}");
+                $"{repo.Name} | {gitState} | {trustState} | {autoLoadState} | {loadedState} | {autoSyncState} | {repo.LocalPath}");
         }
 
         return Task.FromResult(0);
@@ -213,16 +215,77 @@ internal sealed class RepoRegistryService
         IReadOnlyList<string> args,
         CancellationToken cancellationToken)
     {
-        if (!TryGetRepo(args, "repo trust <name>", context, out var repo))
+        if (!TryParseTrustArgs(context, args, out var repoName, out var options))
+        {
+            return 1;
+        }
+
+        if (!TryGetRepoByName(repoName, context, out var repo))
         {
             return 1;
         }
 
         repo.Trusted = true;
+        if (options.AutoLoad)
+        {
+            repo.AutoLoad = true;
+        }
+
         await SaveSettingsAsync(cancellationToken);
         context.WriteLine("Trusted command packs execute arbitrary code on your machine and are not sandboxed.");
         context.WriteLine("Only trust repos you control or have reviewed.");
         context.WriteLine($"Marked '{repo.Name}' as trusted.");
+
+        if (options.AutoLoad)
+        {
+            context.WriteLine($"'{repo.Name}' will automatically load on startup.");
+        }
+
+        if (options.AutoLoad && options.Profile)
+        {
+            context.WriteLine("Note: --autoload loads before the profile. --profile adds a repo load command to profile.rsh.");
+        }
+        else if (!options.LoadNow && !options.Profile)
+        {
+            context.WriteLine($"To load now: repo load {repo.Name}");
+            context.WriteLine($"To auto-load on startup: repo trust {repo.Name} --autoload");
+            context.WriteLine($"To add to profile: repo trust {repo.Name} --profile");
+        }
+
+        if (options.LoadNow)
+        {
+            if (_loadRepoAction is null)
+            {
+                context.WriteErrorLine("Repo load support is not available.");
+                return 1;
+            }
+
+            var loadResult = await _loadRepoAction(context, repo, cancellationToken);
+            if (loadResult != 0)
+            {
+                return loadResult;
+            }
+        }
+
+        if (options.Profile)
+        {
+            var profilePath = RepoProfileService.GetProfilePath(_stateDirectory);
+            var added = await RepoProfileService.AppendRepoLoadLineAsync(profilePath, repo.Name, cancellationToken);
+            if (added)
+            {
+                context.WriteLine($"Added '{RepoProfileService.GetRepoLoadLine(repo.Name)}' to profile: {profilePath}");
+            }
+            else
+            {
+                context.WriteLine($"Profile already contains '{RepoProfileService.GetRepoLoadLine(repo.Name)}': {profilePath}");
+            }
+        }
+
+        if (options.AutoLoad)
+        {
+            await SaveSettingsAsync(cancellationToken);
+        }
+
         return 0;
     }
 
@@ -243,9 +306,22 @@ internal sealed class RepoRegistryService
         }
 
         repo.Trusted = false;
+        repo.AutoLoad = false;
         _watchService.StopWatching(repo.Name, out _);
         await SaveSettingsAsync(cancellationToken);
         context.WriteLine($"Marked '{repo.Name}' as untrusted.");
+
+        var profilePath = RepoProfileService.GetProfilePath(_stateDirectory);
+        if (await RepoProfileService.RemoveRepoLoadLineAsync(profilePath, repo.Name, cancellationToken))
+        {
+            context.WriteLine($"Removed '{RepoProfileService.GetRepoLoadLine(repo.Name)}' from profile: {profilePath}");
+        }
+        else
+        {
+            context.WriteLine(
+                $"Profile does not contain '{RepoProfileService.GetRepoLoadLine(repo.Name)}': {profilePath}");
+        }
+
         return 0;
     }
 
@@ -406,6 +482,21 @@ internal sealed class RepoRegistryService
         return CommandPackPathResolver.IsPathWithinRoot(_stateDirectory, path, allowExactMatch: false);
     }
 
+    internal bool HasProfileLoadLine(string repoName)
+    {
+        return RepoProfileService.HasRepoLoadLine(RepoProfileService.GetProfilePath(_stateDirectory), repoName);
+    }
+
+    internal string GetProfilePath()
+    {
+        return RepoProfileService.GetProfilePath(_stateDirectory);
+    }
+
+    internal void SetLoadRepoAction(Func<ShellContext, CommandRepoSettings, CancellationToken, Task<int>> loadRepoAction)
+    {
+        _loadRepoAction = loadRepoAction;
+    }
+
     private async Task<int> RunGitCloneAsync(
         string repoName,
         string source,
@@ -488,4 +579,50 @@ internal sealed class RepoRegistryService
         return source.Contains("git@", StringComparison.OrdinalIgnoreCase) ||
                source.EndsWith(".git", StringComparison.OrdinalIgnoreCase);
     }
+
+    private static bool TryParseTrustArgs(
+        ShellContext context,
+        IReadOnlyList<string> args,
+        out string repoName,
+        out TrustOptions options)
+    {
+        repoName = string.Empty;
+        options = default;
+
+        if (args.Count < 2)
+        {
+            context.WriteErrorLine("Usage: repo trust <name> [--autoload] [--load-now] [--profile]");
+            return false;
+        }
+
+        repoName = args[1];
+        for (var index = 2; index < args.Count; index++)
+        {
+            var arg = args[index];
+            switch (arg.ToLowerInvariant())
+            {
+                case "--autoload":
+                    options.AutoLoad = true;
+                    break;
+                case "--load-now":
+                    options.LoadNow = true;
+                    break;
+                case "--profile":
+                    options.Profile = true;
+                    break;
+                default:
+                    context.WriteErrorLine($"Unknown option: {arg}");
+                    return false;
+            }
+        }
+
+        return true;
+    }
+}
+
+internal struct TrustOptions
+{
+    public bool AutoLoad;
+    public bool LoadNow;
+    public bool Profile;
 }

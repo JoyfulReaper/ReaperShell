@@ -43,13 +43,13 @@ internal static class Program
         var registry = new CommandRegistry();
         var sessionState = new ShellSessionState();
         var processRunner = new ProcessRunner(sessionState);
-        var commandPackManager = new CommandPackManager(registry, processRunner);
+        var commandPackManager = new CommandPackManager(registry, processRunner, workspaceRoot);
         var lifetime = new ShellLifetime();
         var host = new ShellHost(parser, registry, lifetime, processRunner, settings, stateDirectory, sessionState);
         var watchService = new ShellWatchService(host);
         var editorLauncher = new EditorLauncher(settings, processRunner);
 
-        RegisterBuiltIns(
+        var repoCommand = RegisterBuiltIns(
             registry,
             settings,
             sessionState,
@@ -71,6 +71,10 @@ internal static class Program
 
         var defaultProfilePath = Path.Combine(stateDirectory, "profile.rsh");
         await EnsureDefaultProfileExistsAsync(defaultProfilePath);
+        if (!options.NoAutoLoad)
+        {
+            await repoCommand.AutoLoadTrustedReposAsync(context, CancellationToken.None);
+        }
         var shouldRunProfile =
             !options.NoProfile &&
             (options.ProfilePath is not null || options.ScriptPath is null && options.CommandText is null);
@@ -111,7 +115,7 @@ internal static class Program
             CancellationToken.None);
     }
 
-    private static void RegisterBuiltIns(
+    private static RepoCommand RegisterBuiltIns(
         CommandRegistry registry,
         ShellSettings settings,
         ShellSessionState sessionState,
@@ -168,16 +172,17 @@ internal static class Program
         registry.RegisterBuiltIn(new FortuneCommand());
         registry.RegisterBuiltIn(new PrayCommand());
         registry.RegisterBuiltIn(new ReloadCommand(host));
-        registry.RegisterBuiltIn(
-            new RepoCommand(
-                settings,
-                processRunner,
-                commandPackManager,
-                host,
-                watchService,
-                workspaceRoot,
-                stateDirectory));
+        var repoCommand = new RepoCommand(
+            settings,
+            processRunner,
+            commandPackManager,
+            host,
+            watchService,
+            workspaceRoot,
+            stateDirectory);
+        registry.RegisterBuiltIn(repoCommand);
         registry.RegisterBuiltIn(new PluginsCommand(commandPackManager));
+        return repoCommand;
     }
 
     private static async Task<ShellSettings> LoadSettingsAsync(string stateDirectory)
@@ -292,6 +297,10 @@ pray
                     options.ContinueOnError = true;
                     break;
 
+                case "--no-autoload":
+                    options.NoAutoLoad = true;
+                    break;
+
                 case "--no-profile":
                     options.NoProfile = true;
                     break;
@@ -350,13 +359,14 @@ pray
         return """
 Usage:
   ReaperShell
-  ReaperShell --command "<command>" [--profile <path>] [--no-profile]
-  ReaperShell --script <path> [--continue-on-error] [--state-dir <path>] [--profile <path>] [--no-profile]
+  ReaperShell --command "<command>" [--profile <path>] [--no-profile] [--no-autoload]
+  ReaperShell --script <path> [--continue-on-error] [--state-dir <path>] [--profile <path>] [--no-profile] [--no-autoload]
 
 Options:
   --command <command>         Execute one command and exit.
   --script <path>             Execute commands from a script file and exit.
   --continue-on-error         Continue running a script after a command fails.
+  --no-autoload               Skip trusted repo auto-loading on startup.
   --no-profile                Disable profile execution.
   --profile <path>            Execute the provided profile instead of <state-dir>/profile.rsh.
   --state-dir <path>          Store settings.json and managed repos under this directory.
@@ -372,6 +382,8 @@ internal sealed class ProgramOptions
     public bool ContinueOnError { get; set; }
 
     public bool NoProfile { get; set; }
+
+    public bool NoAutoLoad { get; set; }
 
     public string? ProfilePath { get; set; }
 

@@ -137,5 +137,7 @@ public sealed class CommandRepoSettings
 
     public bool IsGitRepo { get; set; }
 
+    public bool AutoLoad { get; set; }
+
     public bool AutoSyncOnSuccessfulReload { get; set; }
 }

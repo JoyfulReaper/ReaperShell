@@ -46,6 +46,96 @@ public sealed class CommandScaffoldingTests : IDisposable
         AssertProjectReferencesAstractions(result.ProjectPath);
     }
 
+    [Fact]
+    public async Task CommandPackUsingWorkspacePropertyReferenceBuildsAndLoads()
+    {
+        var repoRoot = Path.Combine(_root, "property-reference-pack");
+        Directory.CreateDirectory(Path.Combine(repoRoot, "commands", "hello"));
+
+        await new CommandPackManifest
+        {
+            Id = "property-reference-pack",
+            Name = "property-reference-pack Pack",
+            Description = "Repo used for workspace property reference tests.",
+            CommandsPath = "commands"
+        }.SaveAsync(Path.Combine(repoRoot, "shellpack.json"), CancellationToken.None);
+
+        var projectPath = Path.Combine(repoRoot, "commands", "hello", "HelloCommand.csproj");
+        await File.WriteAllTextAsync(
+            projectPath,
+            """
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="$(ReaperShellAbstractionsProject)" />
+  </ItemGroup>
+
+</Project>
+""");
+
+        await File.WriteAllTextAsync(
+            Path.Combine(repoRoot, "commands", "hello", "HelloCommand.cs"),
+            """
+using ReaperShell.Abstractions;
+
+namespace HelloCommand;
+
+public sealed class HelloCommand : IShellCommand
+{
+    public string Name => "hello";
+
+    public string Description => "Prints a hello message from a workspace-property command.";
+
+    public Task<int> ExecuteAsync(
+        ShellContext context,
+        IReadOnlyList<string> args,
+        CancellationToken cancellationToken = default)
+    {
+        context.WriteLine("Hello from a workspace-property command.");
+        return Task.FromResult(0);
+    }
+}
+""");
+
+        var settings = new ShellSettings();
+        settings.Repos["property-reference-pack"] = new CommandRepoSettings
+        {
+            Name = "property-reference-pack",
+            Source = repoRoot,
+            LocalPath = repoRoot,
+            Trusted = true
+        };
+
+        var commandPackManager = new CommandPackManager(new CommandRegistry(), new ProcessRunner(), _workspaceRoot);
+        var stdout = new StringWriter();
+        var stderr = new StringWriter();
+        var context = new ShellContext(stdout, stderr, new DirectoryInfo(repoRoot), services: null, CancellationToken.None);
+
+        var buildResult = await commandPackManager.BuildAsync(
+            settings.Repos["property-reference-pack"],
+            settings.DefaultConfiguration,
+            context,
+            CancellationToken.None);
+
+        Assert.Equal(0, buildResult.ExitCode);
+        Assert.True(File.Exists(Path.Combine(repoRoot, "commands", "hello", "bin", "Debug", "net10.0", "HelloCommand.dll")));
+
+        var loadResult = await commandPackManager.LoadAsync(
+            settings.Repos["property-reference-pack"],
+            settings.DefaultConfiguration,
+            context,
+            CancellationToken.None);
+
+        Assert.Equal(0, loadResult.ExitCode);
+        Assert.Contains("hello", loadResult.LoadedCommands);
+    }
+
     [Theory]
     [InlineData("csharp", ".csproj", ".cs")]
     [InlineData("cs", ".csproj", ".cs")]
@@ -230,7 +320,7 @@ public sealed class CommandScaffoldingTests : IDisposable
         }.SaveAsync(Path.Combine(repoRoot, "shellpack.json"), CancellationToken.None);
 
         var settings = CreateSettings("loaded-remove", repoRoot);
-        var commandPackManager = new CommandPackManager(new CommandRegistry(), new ProcessRunner());
+        var commandPackManager = new CommandPackManager(new CommandRegistry(), new ProcessRunner(), _workspaceRoot);
         var repo = settings.Repos["loaded-remove"];
         MarkRepoAsLoaded(commandPackManager, "loaded-remove", repoRoot);
 
@@ -307,7 +397,7 @@ public sealed class CommandScaffoldingTests : IDisposable
             Trusted = true
         };
 
-        var command = new CommandCommand(settings, new CommandPackManager(new CommandRegistry(), new ProcessRunner()), _workspaceRoot);
+        var command = new CommandCommand(settings, new CommandPackManager(new CommandRegistry(), new ProcessRunner(), _workspaceRoot), _workspaceRoot);
         var stdout = new StringWriter();
         var stderr = new StringWriter();
         var context = new ShellContext(stdout, stderr, new DirectoryInfo(repoRoot), services: null, CancellationToken.None);
@@ -481,7 +571,7 @@ public sealed class CommandScaffoldingTests : IDisposable
         string workingDirectory,
         params string[] args)
     {
-        var command = new CommandCommand(settings, new CommandPackManager(new CommandRegistry(), new ProcessRunner()), _workspaceRoot);
+        var command = new CommandCommand(settings, new CommandPackManager(new CommandRegistry(), new ProcessRunner(), _workspaceRoot), _workspaceRoot);
         return await ExecuteCommandAsync(command, workingDirectory, args);
     }
 

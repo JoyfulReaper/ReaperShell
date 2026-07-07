@@ -1,247 +1,185 @@
 # ReaperShell
 
-ReaperShell is a live-extensible programmer shell built as a .NET console app. It combines a small interactive shell with hot-loadable command packs, so you can build and reload custom commands without restarting the host.
+ReaperShell is a .NET-based interactive shell for developers who want live, local, scriptable tooling. It ships with practical built-in commands, supports hot-loadable command packs, and can manage Git-backed command-pack repos without leaving the shell.
 
-## Why It Exists
+## What Is ReaperShell?
 
-Most shells are either static tools or full scripting environments. ReaperShell aims for a narrower model:
+ReaperShell is a console shell built on .NET 10. It combines familiar shell-style commands with a plugin model that loads command packs as regular .NET projects.
 
-- built-in commands for navigation, inspection, and shell management
-- command packs as regular .NET projects in C#, F#, or VB.NET
-- live build, load, unload, and reload during one shell session
-- lightweight local customization through profiles, aliases, rituals, and hooks
+It is designed for:
 
-It is an MVP intended for experimentation, iteration, and local automation, not a sandbox or a locked-down plugin host.
+- scripting local workflows
+- experimenting with shell UX
+- building custom developer tools in C#, F#, or VB.NET
+- loading, rebuilding, and reloading command packs while you iterate
 
-## Security Warning
+It is intentionally lightweight and experimental. ReaperShell is not a sandbox, and trusted command packs run in-process with your user privileges.
 
-ReaperShell is not a sandbox.
+## Why Use It?
 
-Trusted command packs are in-process plugins that execute arbitrary code with your user account. They can read and write files you can access, spawn processes, and keep state alive after load.
+ReaperShell is useful when you want:
 
-Only trust repos you control or have reviewed.
+- shell commands written in C#
+- fast iteration on local automation
+- command packs that are normal SDK-style .NET projects
+- live reload of custom tooling without restarting the host
+- a small developer playground for shell behavior and command design
 
-## Quick Start
+## Origin
 
-Build and run the shell:
+ReaperShell has been shaped by real command packs more than toy demos.
+
+One early proving ground was `iis-tools`, which started as a small PowerShell log-searching script. After the original script was accidentally lost, it was rebuilt as a C# command and then split into a proper ReaperShell command pack. That work exposed the rough edges that mattered in practice: loading external commands, rebuilding them quickly, switching command-pack branches, proving which DLL was actually loaded, and surfacing useful repo and reload diagnostics.
+
+That is the kind of workflow ReaperShell is meant to support: small local tools that can start as quick scripts, grow into structured commands, and still stay easy to load, test, rebuild, and improve.
+
+## Requirements
+
+- .NET 10 SDK
+- Git for `repo add`, `repo sync`, `repo pull`, `repo switch`, `repo publish`, and other Git-backed workflows
+- GitHub CLI `gh` for `repo publish`
+- A configured editor if you want `edit` to open files, or a usable fallback such as `code`
+
+Runtime notes:
+
+- The project targets `net10.0`.
+- The shell uses standard .NET console APIs and should run anywhere .NET 10 runs, but the repo is exercised on Windows and some conveniences are Windows-aware.
+- ReaperShell is not a sandbox.
+
+## Installation And Run
+
+Clone the repo, build it, and start the shell:
 
 ```powershell
+git clone https://github.com/JoyfulReaper/ReaperShell.git
+cd ReaperShell
 dotnet build ReaperShell.slnx
 dotnet run --project src/ReaperShell
 ```
 
-Load the sample pack:
-
-```text
-rsh> repo add sample ./sample-packs/hello-pack
-rsh> repo trust sample
-rsh> repo build sample
-rsh> repo load sample
-rsh> hello
-```
-
-## Demo
-
-This is the core ReaperShell loop in practice:
-
-```text
-rsh> repo add sample ./sample-packs/hello-pack
-rsh> repo trust sample
-rsh> repo build sample
-rsh> repo load sample
-rsh> hello
-Hello from a live-loaded ReaperShell command.
-
-rsh> plugins
-sample | hello
-
-rsh> repo reload sample
-rsh> hello
-Hello from a live-loaded ReaperShell command.
-```
-
-## Execution Modes
-
-Interactive mode starts the REPL:
-
-```powershell
-dotnet run --project src/ReaperShell
-```
-
-Single-command mode runs one command and exits with that command's exit code:
+Run a one-off command:
 
 ```powershell
 dotnet run --project src/ReaperShell -- --command "repo list"
 ```
 
-Script mode runs commands from a plain-text `.rsh` file:
+Run a script:
 
 ```powershell
-dotnet run --project src/ReaperShell -- --script scripts/smoke-sample.rsh
+dotnet run --project src/ReaperShell -- --script path\to\script.rsh
 ```
 
 Useful execution flags:
 
-- `--continue-on-error` keeps a script running after a failed command
-- `--state-dir <path>` isolates runtime state and managed repos under another directory
-- `--profile <path>` uses a specific startup profile
-- `--no-profile` skips profile execution
+- `--command <command>` runs one command and exits
+- `--script <path>` runs commands from a script file and exits
+- `--continue-on-error` keeps a script running after a failure
+- `--profile <path>` runs a specific startup profile instead of the default profile
+- `--no-profile` disables profile execution
+- `--state-dir <path>` stores `settings.json` and managed repos under another directory
 
-Unknown commands can optionally fall back to PATH-only executables through `externalCommandMode` in `.rsh/settings.json`. The supported values are `Disabled`, `PathOnly` (default), and `Shell` (reserved for a future shell fallback).
+`--command` and `--script` are mutually exclusive.
+
+## Quick Start
+
+Try this in an interactive shell:
+
+```text
+rsh> help
+rsh> pwd
+rsh> ls
+rsh> echo hello
+rsh> repo list
+```
+
+To try a sample command pack:
+
+```text
+rsh> repo add sample ./sample-packs/hello-pack
+rsh> repo trust sample
+rsh> repo build sample
+rsh> repo load sample
+rsh> hello
+```
 
 ## Built-In Commands
 
-Common built-ins:
+The commands below are currently registered by the shell. Syntax is kept close to the code so it matches the actual parser behavior.
 
-- `version` prints shell, runtime, OS, and process information
-- `history` shows commands from the current session
-- `history clear` clears the current session history
-- `env` lists session environment overrides
-- `env get <name>` reads a session override or inherited process value
-- `env set <name> <value>` sets a session environment override
-- `env unset <name>` removes a session override only
-- `reload` reloads settings and the active profile conservatively
-- `echo` prints arguments joined by spaces
-- `mkdir` creates directories
-- `touch` creates files or updates timestamps
-- `head` prints the first lines of a file
-- `tail` prints the last lines of a file
-- `grep` searches for matching lines in a file
-- `tree` prints a simple directory tree
-- `open` opens a file, directory, or URL with the OS default handler
-- `rm` removes files and directories with explicit recursive/force flags
-- `cp` copies files and directories
-- `mv` moves or renames files and directories
+### Shell Basics
 
-## Command Pack Model
+| Command | Purpose | Syntax | Example |
+| --- | --- | --- | --- |
+| `help` | Lists registered commands and descriptions. | `help` | `help` |
+| `clear` | Clears the screen. | `clear` | `clear` |
+| `exit` / `quit` | Exits the shell. | `exit` | `quit` |
+| `version` | Prints shell, runtime, OS, and process information. | `version` | `version` |
+| `pwd` | Prints the current working directory. | `pwd` | `pwd` |
+| `ls` | Lists files and directories. | `ls [path]` | `ls sample-packs` |
+| `cd` | Changes the current working directory. | `cd <path>` | `cd sample-packs` |
+| `cat` | Prints a text file. | `cat <file>` | `cat README.md` |
+| `echo` | Prints its arguments joined by spaces. | `echo [values...]` | `echo hello world` |
 
-A command pack is a local folder or Git-backed repo containing:
+### File Utilities
 
-- `shellpack.json` describing the pack
+| Command | Purpose | Syntax | Example |
+| --- | --- | --- | --- |
+| `mkdir` | Creates one or more directories. | `mkdir <path> [path...]` | `mkdir scratch logs` |
+| `touch` | Creates files or updates their timestamps. | `touch <file> [file...]` | `touch notes.txt` |
+| `head` | Prints the first lines of a file. | `head [-n <count>] <file>` | `head -n 20 README.md` |
+| `tail` | Prints the last lines of a file. | `tail [-n <count>] <file>` | `tail -n 20 README.md` |
+| `grep` | Searches a text file for matching lines. | `grep [-i|--ignore-case] <pattern> <file>` | `grep -i hello README.md` |
+| `tree` | Prints a directory tree. | `tree [path] [-d|--directories-only]` | `tree sample-packs` |
+| `open` | Opens a file, directory, or URL with the OS default handler. | `open <path-or-url>` | `open https://github.com/JoyfulReaper/ReaperShell` |
+| `rm` | Removes files and directories. | `rm [-r|--recursive] [-f|--force] <path> [path...]` | `rm -r scratch` |
+| `cp` | Copies files and directories. | `cp [-r|--recursive] <source> <destination>` | `cp README.md docs\README.md` |
+| `mv` | Moves or renames files and directories. | `mv <source> <destination>` | `mv draft.txt notes.txt` |
+
+### Introspection And Customization
+
+| Command | Purpose | Syntax | Example |
+| --- | --- | --- | --- |
+| `history` | Prints session history, or clears it. | `history` or `history clear` | `history clear` |
+| `env` | Lists and manages session-scoped environment overrides. | `env`, `env get <name>`, `env set <name> <value>`, `env unset <name>` | `env set FOO bar` |
+| `alias` | Lists and manages aliases. | `alias`, `alias set <name> <replacement>`, `alias remove <name>`, `alias clear`, `alias show <name>` | `alias set ll "ls -a"` |
+| `ritual` | Lists, creates, and runs ritual scripts. | `ritual list`, `ritual run <name> [--continue-on-error]`, `ritual path`, `ritual new <name>` | `ritual run awaken` |
+| `hook` | Lists and manages shell event hooks. | `hook list`, `hook add <event> <ritual-name>`, `hook remove <event> <ritual-name>`, `hook clear <event>`, `hook events` | `hook add startup awaken` |
+| `command` | Lists and forges commands inside a command pack. | `command templates`, `command list <repo>`, `command new <repo> <command-name> [--template <basic|file|process>] [--language <csharp|fsharp|vb>]`, `command <remove|delete|rm> <repo> <command-name>` | `command new tools hello-kyle --language csharp` |
+| `which` | Shows where a command comes from. | `which <command>` | `which hello` |
+| `describe` | Prints details about a command. | `describe <command>` | `describe hello` |
+| `edit` | Opens a file, directory, or repo command area in the configured editor. | `edit <path>`, `edit --repo <repo> [--command <name>]` | `edit --repo tools --command hello-kyle` |
+| `source` | Shows or opens the source location for a command. | `source <command>` | `source hello` |
+| `banner` | Prints the shell banner again. | `banner` | `banner` |
+| `status` | Prints shell runtime status. | `status` | `status` |
+| `doctor` | Runs a focused environment self-check. | `doctor [--verbose]` | `doctor --verbose` |
+| `fortune` | Prints a small shell fortune. | `fortune` | `fortune` |
+| `pray` | Prints a pseudo-ritual shell response. | `pray` | `pray` |
+| `reload` | Reloads settings and the active profile. | `reload` | `reload` |
+
+### Repository And Plugin Management
+
+| Command | Purpose | Syntax | Example |
+| --- | --- | --- | --- |
+| `repo` | Manages command-pack repositories. | See the repo sections below. | `repo list` |
+| `plugins` | Lists loaded command packs and their commands. | `plugins` | `plugins` |
+
+## Command Packs And Plugins
+
+A command pack is a local folder or Git-backed repo that contains:
+
+- `shellpack.json`
 - one or more SDK-style command projects under the configured `commandsPath`
-- assemblies that implement `ReaperShell.Abstractions.IShellCommand`
+- compiled assemblies that implement `ReaperShell.Abstractions.IShellCommand`
 
-ReaperShell commands are normal .NET projects, not C#-only scripts. The currently supported command project types are:
+ReaperShell discovers commands from `shellpack.json` and the `commandsPath` entry. Command projects are normal .NET projects, not scripts.
+
+Supported command project types:
 
 - `*.csproj`
 - `*.fsproj`
 - `*.vbproj`
 
-The normal lifecycle is:
-
-1. register a repo with `repo add` or create one with `repo new`
-2. mark it trusted with `repo trust`
-3. build it with `repo build`
-4. load it with `repo load`
-5. iterate with `repo reload`
-
-ReaperShell validates `shellpack.json` so `commandsPath` cannot escape the pack root.
-
-## Multi-Language Example
-
-The sample multi-language pack lives at [sample-packs/multi-language-pack](sample-packs/multi-language-pack).
-
-It contains one command in each supported project type:
-
-- `hello-csharp`
-- `hello-fsharp`
-- `hello-vb`
-
-That pack demonstrates that ReaperShell command packs are regular SDK-style .NET projects, not C#-only scaffolds.
-
-## Repo Command Manual
-
-Core lifecycle:
-
-- `repo add <name> <path-or-git-url>` registers a local directory or Git source
-- `repo list` lists registered repos
-- `repo trust <name>` marks a repo trusted and warns that it can execute arbitrary code
-- `repo untrust <name>` removes trust from an unloaded repo
-- `repo build <name>` builds one trusted repo
-- `repo load <name>` loads one trusted repo
-- `repo unload <name>` unloads one loaded repo
-- `repo reload <name>` unloads, syncs if needed, rebuilds, and reloads
-- `repo new <name>` creates a new managed local command pack
-- `repo remove <name>` removes a repo from settings without deleting files
-- `repo remove <name> --delete-files` also deletes managed repo files under the state directory
-
-Git-backed workflows:
-
-- `repo status <name>` runs `git status --short`
-- `repo sync <name>` runs `git pull --rebase`
-- `repo commit <name> "message"` stages and commits changes
-- `repo push <name>` pushes the repo
-- `repo save <name> "message"` commits and then pushes
-- `repo publish <name> <owner/repo> [--private|--public]` creates a GitHub repo with `gh repo create`, using `gh auth login` first
-
-Bulk operations:
-
-- `repo build-all` builds all trusted repos
-- `repo load-all` loads all trusted repos that are not already loaded
-- `repo reload-all` reloads all trusted repos
-
-Watch and auto-sync:
-
-- `repo watch <name>` watches a trusted repo in interactive mode and reloads after relevant file changes
-- `repo unwatch <name>` stops watching one repo
-- `repo watch-list` lists watched repos
-- `repo autosync <name> on|off` enables or disables auto-save after successful reload
-
-Registration cleanup:
-
-- `repo add` rejects registering the same local path under multiple repo names
-- `repo prune-duplicates` removes old duplicate repo registrations from settings without deleting files
-
-Notes:
-
-- built-in command names always win over plugin commands
-- duplicate plugin command names are skipped with a warning
-- plugin unload is requested, not guaranteed, because .NET collectible unload still depends on all references being released
-
-## Command Forge Manual
-
-ReaperShell can scaffold new commands inside an existing pack:
-
-- `command templates`
-- `command list <repo>`
-- `command new <repo> <name>`
-- `command new <repo> <name> --template basic`
-- `command new <repo> <name> --template file`
-- `command new <repo> <name> --template process`
-- `command new <repo> <name> --language csharp`
-- `command new <repo> <name> --language fsharp`
-- `command new <repo> <name> --language vb`
-- `command remove <repo> <name>`
-- `command delete <repo> <name>`
-- `command rm <repo> <name>`
-
-C# is the default language. Supported aliases include `cs` and `c#` for C#, `fs` and `f#` for F#, and `vbnet`, `visualbasic`, and `visual-basic` for VB.NET.
-
-Template summary:
-
-- `basic` prints a simple alive message and shows where to add logic
-- `file` reads a text file relative to the shell working directory
-- `process` launches a local executable using `ProcessStartInfo.ArgumentList`
-
-Command names must be lowercase kebab-case and start with a lowercase letter.
-
-## Creating Your First Custom Command
-
-A ReaperShell command is a normal .NET project that implements `IShellCommand`.
-
-Create a local command pack:
-
-```text
-rsh> repo new tools
-```
-
-Create a C# command inside that pack:
-
-```text
-rsh> command new tools hello-kyle --language csharp
-```
-
-This creates files similar to:
+Typical command pack layout:
 
 ```text
 tools/
@@ -252,268 +190,286 @@ tools/
       HelloKyleCommand.cs
 ```
 
-Build and load the pack:
+Command packs reference `ReaperShell.Abstractions` and implement `IShellCommand`.
+
+`command new` defaults to C#. Supported language aliases include `cs` and `c#` for C#, `fs` and `f#` for F#, and `vbnet`, `visualbasic`, and `visual-basic` for VB.NET. The available templates are `basic`, `file`, and `process`.
+
+### Loading And Reloading
+
+- `repo build <name>` builds a trusted pack.
+- `repo load <name>` loads a trusted pack.
+- `repo reload <name>` unloads, rebuilds, and reloads the currently checked-out branch. It does not pull, rebase, or switch branches.
+- `repo build-all`, `repo load-all`, and `repo reload-all` run the same operations across all trusted repos.
+
+For Git-backed repos, `repo build`, `repo reload`, and `repo reload-all` print the current branch and short commit SHA before building so you can see exactly what is being rebuilt.
+
+### Sample Pack Behavior
+
+The repo ships with:
+
+- [sample-packs/hello-pack](sample-packs/hello-pack)
+- [sample-packs/multi-language-pack](sample-packs/multi-language-pack)
+
+The multi-language pack demonstrates supported command-pack languages:
+
+- C#
+- F#
+- VB.NET
+
+## Repository Management
+
+ReaperShell tracks repo state in `.rsh/settings.json` by default. `repo` commands work with both local packs and Git-backed packs.
+
+### Local Pack Creation
+
+`repo new <name>` creates a managed local command pack and scaffolds a starter command.
+
+It also creates a root `.gitignore` with standard .NET command-pack ignores so build artifacts do not get committed accidentally:
+
+- `bin/`
+- `obj/`
+- `.vs/`
+- `*.user`
+- `*.suo`
+- `TestResults/`
+- `*.nupkg`
+- `*.snupkg`
+
+When `repo publish` bootstraps a non-Git pack, it also makes sure that root `.gitignore` exists before the initial commit.
+
+### Git Workflows
+
+| Command | Purpose | Syntax | Example |
+| --- | --- | --- | --- |
+| `repo add` | Registers an existing local pack or clones a Git URL into managed state. | `repo add <name> <path-or-git-url>` | `repo add tools ./sample-packs/hello-pack` |
+| `repo list` | Lists registered repos. | `repo list` | `repo list` |
+| `repo remove` | Removes a repo from settings, optionally deleting managed files. | `repo remove <name>`, `repo remove <name> --delete-files` | `repo remove tools` |
+| `repo trust` | Marks a repo trusted, with optional autoload/profile behavior. | `repo trust <name> [--autoload] [--load-now] [--profile]` | `repo trust tools --autoload` |
+| `repo untrust` | Removes trust from an unloaded repo and clears autoload/profile integration. | `repo untrust <name>` | `repo untrust tools` |
+| `repo status` | Shows repo state and Git branch information. | `repo status <name>` | `repo status iis-tools` |
+| `repo branches` | Lists local and remote branches. | `repo branches <name>` | `repo branches iis-tools` |
+| `repo switch` | Switches branches, creating a tracking branch when needed. | `repo switch <name> <branch> [--force]` | `repo switch iis-tools dev` |
+| `repo pull` | Fast-forward-only pull of the current branch. | `repo pull <name>` | `repo pull iis-tools` |
+| `repo sync` | Compatibility alias for the same fast-forward-only pull behavior. | `repo sync <name>` | `repo sync iis-tools` |
+| `repo commit` | Stages and commits changes. | `repo commit <name> "message"` | `repo commit tools "Update command"` |
+| `repo push` | Pushes the repo. | `repo push <name>` | `repo push tools` |
+| `repo save` | Commits and then pushes. | `repo save <name> "message"` | `repo save tools "Add command"` |
+| `repo publish` | Bootstraps a local pack into GitHub using `gh repo create`. | `repo publish <name> <owner/repo> [--private|--public]` | `repo publish tools YourUser/reapershell-tools --private` |
+
+### Branch Management
+
+Branch management is explicit:
+
+- `repo branches <name>` shows local branches, remote branches, and the detected default remote branch.
+- `repo status <name>` shows the current local branch, upstream branch, short commit SHA, dirty state, and available remote branches.
+- `repo switch <name> <branch>` fetches `origin` first, then switches branches.
+- If the branch exists only remotely, `repo switch` creates a local tracking branch.
+- Passing `origin/dev` works too; ReaperShell switches to a local `dev` tracking `origin/dev`.
+- `repo pull <name>` uses `git pull --ff-only`.
+- `repo sync <name>` uses the same `git pull --ff-only` behavior as `repo pull <name>`.
+- `repo reload <name>` never fetches, pulls, rebases, or switches branches.
+
+Important behavior:
+
+- Fetching a branch does not switch to it.
+- ReaperShell does not switch branches implicitly during reload.
+- Branch switching is always explicit.
+- `repo switch` refuses to move a dirty working tree unless `--force` is provided.
+- `--force` is conservative and only discards tracked changes when you explicitly ask for it.
+
+### Reload Output
+
+When you run `repo reload <name>` or `repo reload-all`, ReaperShell prints the repo name, current branch, and short commit SHA before building. That makes it obvious what branch is actually being rebuilt.
+
+Recommended workflow for updating a branch and then rebuilding it:
 
 ```text
-rsh> repo build tools
-rsh> repo load tools
+repo switch iis-tools dev
+repo pull iis-tools
+repo reload iis-tools
 ```
 
-Run the generated command:
+## Scripts, Profiles, Rituals, And Hooks
+
+### State Directory
+
+By default, ReaperShell stores runtime state under `.rsh` in the current working directory. You can move that with `--state-dir <path>`.
+
+The default state directory contains:
+
+- `settings.json`
+- `profile.rsh`
+- `rituals/`
+- `repos/` for managed repos created by ReaperShell
+
+### Profiles
+
+The interactive shell runs a startup profile by default.
+
+- Default profile: `.rsh/profile.rsh`
+- Explicit profile: `--profile <path>`
+- Disable profiles: `--no-profile`
+
+Profiles are plain `.rsh` scripts.
+
+### Rituals
+
+Rituals are named `.rsh` scripts stored under `.rsh/rituals/`.
+
+- `ritual list` lists available ritual names
+- `ritual path` prints the rituals directory
+- `ritual new <name>` creates a new ritual
+- `ritual run <name>` runs one ritual
+- `ritual run <name> --continue-on-error` keeps going after failures
+
+### Hooks
+
+Hooks connect shell events to rituals.
+
+- `hook events` lists supported event names
+- `hook add <event> <ritual-name>` attaches a ritual
+- `hook list` shows configured hooks
+- `hook remove <event> <ritual-name>` removes one ritual from one hook
+- `hook clear <event>` clears one hook
+
+Hooked rituals live in `.rsh/rituals/` and are referenced by name.
+
+## Aliases
+
+Aliases are stored in `.rsh/settings.json` and expand before execution.
+
+Examples:
 
 ```text
-rsh> hello-kyle
-hello-kyle command is alive.
+rsh> alias set ll "ls -a"
+rsh> alias show ll
+rsh> alias remove ll
+rsh> alias clear
 ```
 
-Edit the generated command source file, then reload the pack:
+Notes:
 
-```text
-rsh> repo reload tools
-rsh> hello-kyle
-```
+- Aliases are session-facing command replacements.
+- Recursive alias loops are blocked.
+- Built-in command names cannot be replaced with aliases.
 
-The generated command implements this contract:
+## Configuration And State
+
+ReaperShell keeps its runtime state outside the source tree by default.
+
+Key files and directories:
+
+- `.rsh/settings.json` stores repos, aliases, hooks, editor choice, and external command mode
+- `.rsh/profile.rsh` is the default startup profile
+- `.rsh/rituals/` stores ritual scripts
+- `.rsh/repos/` stores managed local repos created by `repo new` or some Git URL workflows
+
+What to commit:
+
+- commit source files, command-pack projects, manifests, and intentional pack content
+- do not commit `.rsh/` runtime state
+- do not commit `bin/` and `obj/` build outputs
+
+Generated command packs and Git-backed packs are scaffolded with a `.gitignore` that covers common .NET artifacts.
+
+## Writing Your Own Command
+
+A ReaperShell command is a normal .NET class that implements `IShellCommand`.
+
+Minimal C# example:
 
 ```csharp
 using ReaperShell.Abstractions;
 
-namespace HelloKyleCommand;
+namespace HelloCommand;
 
-public sealed class HelloKyleCommand : IShellCommand
+public sealed class HelloCommand : IShellCommand
 {
-    public string Name => "hello-kyle";
+    public string Name => "hello";
 
-    public string Description => "Generated by ReaperShell.";
+    public string Description => "Prints a hello message from a live-loaded command.";
 
     public Task<int> ExecuteAsync(
         ShellContext context,
         IReadOnlyList<string> args,
         CancellationToken cancellationToken = default)
     {
-        context.WriteLine("hello-kyle command is alive.");
+        context.WriteLine("Hello from sample command pack.");
         return Task.FromResult(0);
     }
 }
 ```
 
-Use `context.WriteLine(...)` for normal output and `context.WriteErrorLine(...)` for errors.
+What matters:
 
-Return `0` for success and non-zero for failure.
+- `Name` is the command name
+- `Description` shows up in `help`
+- write normal output through `ShellContext.WriteLine`
+- write errors through `ShellContext.WriteErrorLine`
+- return `0` for success and a non-zero exit code for failure
 
-### Creating Commands in F# or VB.NET
+## Sample Command Packs
 
-F#:
+The repository includes sample packs under `sample-packs/`:
 
-```text
-rsh> command new tools hello-fsharp --language fsharp
-```
+- `hello-pack` demonstrates a simple C# command pack
+- `multi-language-pack` demonstrates C#, F#, and VB.NET command projects
 
-VB.NET:
-
-```text
-rsh> command new tools hello-vb --language vb
-```
-
-Templates work with all supported languages:
+Typical usage:
 
 ```text
-rsh> command new tools read-log --template file --language csharp
-rsh> command new tools read-log --template file --language fsharp
-rsh> command new tools read-log --template file --language vb
+rsh> repo add sample ./sample-packs/hello-pack
+rsh> repo trust sample
+rsh> repo build sample
+rsh> repo load sample
+rsh> hello
 ```
 
-## Publishing a Command Pack to GitHub
+## Troubleshooting
 
-Local command packs can be published to GitHub with the GitHub CLI.
+- `command not found`: run `help`, `plugins`, or `which <name>` to see whether the command is built-in, loaded from a pack, or missing from PATH
+- `command pack does not load`: make sure you ran `repo build <name>` first and that the pack is trusted
+- `repo is on the wrong branch`: use `repo status <name>` and `repo branches <name>`, then `repo switch <name> <branch>`
+- `reload did not update the command`: verify you switched branches first, then run `repo reload <name>`
+- `repo switch` refuses: the working tree has uncommitted changes; use `--force` only if you want to discard tracked changes
+- `git branch exists remotely but not locally`: `repo switch <name> <branch>` will create a tracking branch if `origin/<branch>` exists
+- `plugin unload warning`: unload is requested, not guaranteed, because collectible unload depends on references being released
+- `build fails`: inspect the output from `repo build` or `repo reload`; `doctor --verbose` can also help check the environment
+- `missing ReaperShell.Abstractions`: make sure command projects reference the workspace copy of `ReaperShell.Abstractions`
+- `scripts not running`: check the script path, and remember that `--continue-on-error` only applies to script execution
+- `profile path issues`: verify `.rsh/profile.rsh` exists, or use `--profile <path>` to point at a specific profile
 
-Install and authenticate `gh` first:
+## Development
+
+Repository layout:
+
+- `src/ReaperShell` - host shell and built-in commands
+- `src/ReaperShell.Abstractions` - the command-pack interface and shared abstractions
+- `tests/ReaperShell.Tests` - unit and integration tests
+- `sample-packs/` - runnable example packs
+
+Useful commands:
 
 ```powershell
-gh auth login
+dotnet build ReaperShell.slnx
+dotnet test tests/ReaperShell.Tests/ReaperShell.Tests.csproj
+dotnet run --project src/ReaperShell
 ```
 
-Then publish the local pack:
+If you want to extend the shell:
 
-```text
-rsh> repo publish tools YourUser/reapershell-tools --private
-```
+- add a built-in command under `src/ReaperShell/BuiltIns`
+- register it in `Program.RegisterBuiltIns`
+- add a command-pack command by creating a project under a pack's `commands/` directory and implementing `IShellCommand`
 
-Use `--public` instead of `--private` for a public repository:
+The codebase favors straightforward, explicit command handlers and direct .NET APIs over extra abstraction.
 
-```text
-rsh> repo publish tools YourUser/reapershell-tools --public
-```
+## Roadmap And Status
 
-After publishing, the repo becomes Git-backed, so you can save changes with:
+ReaperShell is an early experimental project. It is useful for local tooling, experimentation, and learning, but it is not trying to be a full general-purpose shell replacement.
 
-```text
-rsh> repo save tools "Add hello-kyle command"
-```
+Expect the surface area to evolve as command-pack workflows, repo workflows, and shell ergonomics mature.
 
-For an already-existing GitHub repo, use `repo add` instead:
+## License
 
-```text
-rsh> repo add tools https://github.com/YourUser/reapershell-tools.git
-rsh> repo trust tools
-```
-
-## Practical Development Loop
-
-A typical custom command workflow looks like this:
-
-```text
-rsh> repo new tools
-rsh> command new tools iis-error-search --language csharp
-rsh> repo reload tools
-rsh> iis-error-search
-```
-
-Then edit the generated command source file:
-
-```text
-commands/
-  iis-error-search/
-    IisErrorSearchCommand.csproj
-    IisErrorSearchCommand.cs
-```
-
-Reload after changes:
-
-```text
-rsh> repo reload tools
-rsh> iis-error-search
-```
-
-Save the command pack if it is Git-backed:
-
-```text
-rsh> repo save tools "Add IIS error search command"
-```
-
-Use `repo status` when unsure what changed:
-
-```text
-rsh> repo status tools
-```
-
-After deleting a command from a loaded repo, run:
-
-```text
-rsh> repo reload tools
-```
-
-## Profiles, Aliases, Rituals, and Hooks
-
-Profiles:
-
-- ReaperShell creates `<state-dir>/profile.rsh` on first interactive startup
-- the profile runs at interactive startup unless you pass `--no-profile`
-
-Aliases:
-
-- `alias` lists aliases
-- `alias set <name> <replacement>`
-- `alias show <name>`
-- `alias remove <name>`
-- `alias clear`
-
-Rituals:
-
-- `ritual path` prints the rituals directory
-- `ritual list` lists saved rituals
-- `ritual new <name>` creates a starter ritual
-- `ritual run <name>`
-- `ritual run <name> --continue-on-error`
-
-Hooks:
-
-- `hook events` lists supported shell events
-- `hook list` lists configured hooks
-- `hook add <event> <ritual-name>`
-- `hook remove <event> <ritual-name>`
-- `hook clear <event>`
-
-Interactive startup also creates a starter ritual at `<state-dir>/rituals/awaken.rsh`.
-
-## Doctor and Smoke Tests
-
-Diagnostics:
-
-- `status` prints current shell/runtime status
-- `doctor` runs a compact environment self-check
-- `doctor --verbose` includes paths and command output where useful
-
-Smoke artifacts:
-
-- [scripts/smoke-sample.rsh](scripts/smoke-sample.rsh)
-- [scripts/smoke-generated.rsh](scripts/smoke-generated.rsh)
-- [scripts/smoke-repo-lifecycle.rsh](scripts/smoke-repo-lifecycle.rsh)
-- [scripts/smoke-customization.rsh](scripts/smoke-customization.rsh)
-- [scripts/smoke-hooks.rsh](scripts/smoke-hooks.rsh)
-- [scripts/smoke-doctor.rsh](scripts/smoke-doctor.rsh)
-- [scripts/smoke-command-forge.rsh](scripts/smoke-command-forge.rsh)
-- [scripts/smoke-multilang.rsh](scripts/smoke-multilang.rsh)
-- [scripts/run-multilang-smoke.ps1](scripts/run-multilang-smoke.ps1)
-- [scripts/run-validation-smoke.ps1](scripts/run-validation-smoke.ps1)
-- [scripts/run-security-smoke.ps1](scripts/run-security-smoke.ps1)
-- [scripts/run-smoke.ps1](scripts/run-smoke.ps1)
-
-Run the full smoke harness:
-
-```powershell
-./scripts/run-smoke.ps1
-```
-
-Run just the multi-language command pack verification:
-
-```powershell
-./scripts/run-multilang-smoke.ps1
-```
-
-## Security Model
-
-ReaperShell intentionally trusts local code once you say a repo is trusted. That means:
-
-- no plugin sandbox
-- no network policy enforcement
-- no filesystem isolation
-- no guarantee that unload immediately frees every assembly or file lock
-
-What ReaperShell does try to do:
-
-- require explicit trust before build/load workflows
-- keep command-pack discovery contained to the pack root
-- avoid duplicate command registration
-- make unload behavior explicit instead of pretending it is guaranteed
-
-## Project Structure
-
-High-level layout:
-
-- [src/ReaperShell](src/ReaperShell) - host application, built-ins, shell runtime, plugin loader
-- [src/ReaperShell.Abstractions](src/ReaperShell.Abstractions) - shared command contract for host and plugins
-- [sample-packs/hello-pack](sample-packs/hello-pack) - sample live-loadable command pack
-- [sample-packs/multi-language-pack](sample-packs/multi-language-pack) - sample C#, F#, and VB.NET command pack
-- [scripts](scripts) - smoke scripts and validation/security harnesses
-
-Runtime state:
-
-- `.rsh/settings.json` is local runtime state, not the source of truth for reusable commands
-- command packs and Git repos are the real source of reusable behavior
-- `.rsh` usually should not be committed unless you intentionally want to preserve local shell state
-
-## Recommended Workflow
-
-For day-to-day use, the smoothest loop is:
-
-1. create or register a command pack with `repo new` or `repo add`
-2. trust it only after review with `repo trust`
-3. scaffold commands with `command new`
-4. build and load with `repo build` and `repo load`
-5. iterate with `repo reload` or `repo watch`
-6. save Git-backed work with `repo save`
-7. use `doctor` and `./scripts/run-smoke.ps1` when you want a health check before bigger changes
-
-If you are sharing command packs, treat the repo itself as the durable artifact. ReaperShell runtime state is best kept local unless you explicitly want to preserve that machine-specific shell environment.
-````
+MIT License. See [LICENSE](LICENSE).

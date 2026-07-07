@@ -11,11 +11,13 @@ public sealed class CommandPackManager
     private readonly Dictionary<string, LoadedCommandPack> _loadedPacks =
         new(StringComparer.OrdinalIgnoreCase);
     private readonly ProcessRunner _processRunner;
+    private readonly string _workspaceRoot;
 
-    public CommandPackManager(CommandRegistry commandRegistry, ProcessRunner processRunner)
+    public CommandPackManager(CommandRegistry commandRegistry, ProcessRunner processRunner, string workspaceRoot)
     {
         _commandRegistry = commandRegistry;
         _processRunner = processRunner;
+        _workspaceRoot = workspaceRoot;
     }
 
     public IReadOnlyCollection<LoadedCommandPack> LoadedPacks => _loadedPacks.Values.ToArray();
@@ -33,10 +35,19 @@ public sealed class CommandPackManager
     {
         try
         {
+            var abstractionsProjectPath = GetReaperShellAbstractionsProjectPath();
+            if (!File.Exists(abstractionsProjectPath))
+            {
+                context.WriteErrorLine(
+                    $"ReaperShell.Abstractions project was not found: {abstractionsProjectPath}");
+                return new CommandPackBuildResult(1, Array.Empty<string>());
+            }
+
             var manifest = await LoadManifestAsync(repo, cancellationToken);
             var commandProjects = DiscoverCommandProjects(repo, manifest);
             var nuGetConfigPath = await EnsureNuGetConfigAsync(cancellationToken);
             var dotnetEnvironment = CreateDotnetEnvironment();
+            var abstractionsProperty = $"/p:ReaperShellAbstractionsProject={abstractionsProjectPath}";
 
             if (commandProjects.Count == 0)
             {
@@ -58,7 +69,14 @@ public sealed class CommandPackManager
 
                 var restoreResult = await _processRunner.RunAsync(
                     "dotnet",
-                    ["restore", projectPath, "--configfile", nuGetConfigPath, "--ignore-failed-sources"],
+                    [
+                        "restore",
+                        projectPath,
+                        "--configfile",
+                        nuGetConfigPath,
+                        "--ignore-failed-sources",
+                        abstractionsProperty
+                    ],
                     repo.LocalPath,
                     context.WriteLine,
                     context.WriteErrorLine,
@@ -73,7 +91,7 @@ public sealed class CommandPackManager
 
                 var result = await _processRunner.RunAsync(
                     "dotnet",
-                    ["build", projectPath, "-c", configuration, "--no-restore"],
+                    ["build", projectPath, "-c", configuration, "--no-restore", abstractionsProperty],
                     repo.LocalPath,
                     context.WriteLine,
                     context.WriteErrorLine,
@@ -104,6 +122,16 @@ public sealed class CommandPackManager
             context.WriteErrorLine($"Build failed: {ex.Message}");
             return new CommandPackBuildResult(1, Array.Empty<string>());
         }
+    }
+
+    private string GetReaperShellAbstractionsProjectPath()
+    {
+        return Path.GetFullPath(
+            Path.Combine(
+                _workspaceRoot,
+                "src",
+                "ReaperShell.Abstractions",
+                "ReaperShell.Abstractions.csproj"));
     }
 
     private static async Task<string> EnsureNuGetConfigAsync(CancellationToken cancellationToken)
