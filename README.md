@@ -198,7 +198,7 @@ Command packs reference `ReaperShell.Abstractions` and implement `IShellCommand`
 
 - `repo build <name>` builds a trusted pack.
 - `repo load <name>` loads a trusted pack.
-- `repo reload <name>` unloads, syncs if needed, rebuilds, and reloads a trusted pack.
+- `repo reload <name>` unloads, rebuilds, and reloads the currently checked-out branch. It does not pull, rebase, or switch branches.
 - `repo build-all`, `repo load-all`, and `repo reload-all` run the same operations across all trusted repos.
 
 For Git-backed repos, `repo build`, `repo reload`, and `repo reload-all` print the current branch and short commit SHA before building so you can see exactly what is being rebuilt.
@@ -250,7 +250,7 @@ When `repo publish` bootstraps a non-Git pack, it also makes sure that root `.gi
 | `repo branches` | Lists local and remote branches. | `repo branches <name>` | `repo branches iis-tools` |
 | `repo switch` | Switches branches, creating a tracking branch when needed. | `repo switch <name> <branch> [--force]` | `repo switch iis-tools dev` |
 | `repo pull` | Fast-forward-only pull of the current branch. | `repo pull <name>` | `repo pull iis-tools` |
-| `repo sync` | Rebases the current branch onto remote changes. | `repo sync <name>` | `repo sync iis-tools` |
+| `repo sync` | Compatibility alias for the same fast-forward-only pull behavior. | `repo sync <name>` | `repo sync iis-tools` |
 | `repo commit` | Stages and commits changes. | `repo commit <name> "message"` | `repo commit tools "Update command"` |
 | `repo push` | Pushes the repo. | `repo push <name>` | `repo push tools` |
 | `repo save` | Commits and then pushes. | `repo save <name> "message"` | `repo save tools "Add command"` |
@@ -266,18 +266,28 @@ Branch management is explicit:
 - If the branch exists only remotely, `repo switch` creates a local tracking branch.
 - Passing `origin/dev` works too; ReaperShell switches to a local `dev` tracking `origin/dev`.
 - `repo pull <name>` uses `git pull --ff-only`.
-- `repo sync <name>` still uses `git pull --rebase`.
+- `repo sync <name>` uses the same `git pull --ff-only` behavior as `repo pull <name>`.
+- `repo reload <name>` never fetches, pulls, rebases, or switches branches.
 
 Important behavior:
 
 - Fetching a branch does not switch to it.
 - ReaperShell does not switch branches implicitly during reload.
+- Branch switching is always explicit.
 - `repo switch` refuses to move a dirty working tree unless `--force` is provided.
 - `--force` is conservative and only discards tracked changes when you explicitly ask for it.
 
 ### Reload Output
 
 When you run `repo reload <name>` or `repo reload-all`, ReaperShell prints the repo name, current branch, and short commit SHA before building. That makes it obvious what branch is actually being rebuilt.
+
+Recommended workflow for updating a branch and then rebuilding it:
+
+```text
+repo switch iis-tools dev
+repo pull iis-tools
+repo reload iis-tools
+```
 
 ## Scripts, Profiles, Rituals, And Hooks
 

@@ -8,6 +8,7 @@ using Xunit;
 
 namespace ReaperShell.Tests;
 
+[Collection("Process state")]
 public sealed class ExternalCommandFallbackTests : IAsyncLifetime
 {
     private readonly string _helperRoot = Path.Combine(Path.GetTempPath(), "ReaperShell.ExternalFallbackTests", Guid.NewGuid().ToString("N"));

@@ -8,6 +8,7 @@ using Xunit;
 
 namespace ReaperShell.Tests;
 
+[Collection("Process state")]
 public sealed class SessionConvenienceCommandsTests : IAsyncLifetime
 {
     private readonly string _helperRoot = Path.Combine(Path.GetTempPath(), "ReaperShell.SessionConvenienceCommandsTests", Guid.NewGuid().ToString("N"));

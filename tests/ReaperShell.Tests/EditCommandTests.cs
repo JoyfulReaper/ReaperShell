@@ -8,6 +8,7 @@ using Xunit;
 
 namespace ReaperShell.Tests;
 
+[Collection("Process state")]
 public sealed class EditCommandTests : IAsyncLifetime
 {
     private readonly string _root = Path.Combine(Path.GetTempPath(), "ReaperShell.EditCommandTests", Guid.NewGuid().ToString("N"));

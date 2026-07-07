@@ -7,6 +7,7 @@ using Xunit;
 
 namespace ReaperShell.Tests;
 
+[Collection("Process state")]
 public sealed class ProgramStartupTests : IAsyncLifetime
 {
     private readonly string _root = Path.Combine(Path.GetTempPath(), "ReaperShell.ProgramStartupTests", Guid.NewGuid().ToString("N"));
