@@ -63,10 +63,11 @@ internal sealed class InteractiveLineReader
 
         try
         {
-            var buffer = new StringBuilder();
+            var buffer = new LineEditBuffer();
             IReadOnlyList<string> historySnapshot = [];
             int? historyIndex = null;
             string draftBeforeHistoryNavigation = string.Empty;
+            _previousRenderLength = 0;
             RenderLine(prompt, buffer);
 
             while (!cancellationToken.IsCancellationRequested)
@@ -94,15 +95,25 @@ internal sealed class InteractiveLineReader
                 if (key.Key == ConsoleKey.Enter)
                 {
                     Console.WriteLine();
-                    return buffer.ToString();
+                    return buffer.Text;
                 }
 
                 if (key.Key == ConsoleKey.Backspace)
                 {
                     ExitHistoryNavigation(buffer, ref historySnapshot, ref historyIndex, ref draftBeforeHistoryNavigation);
-                    if (buffer.Length > 0)
+                    if (buffer.Backspace())
                     {
-                        buffer.Length--;
+                        RenderLine(prompt, buffer);
+                    }
+
+                    continue;
+                }
+
+                if (key.Key == ConsoleKey.Delete)
+                {
+                    ExitHistoryNavigation(buffer, ref historySnapshot, ref historyIndex, ref draftBeforeHistoryNavigation);
+                    if (buffer.Delete())
+                    {
                         RenderLine(prompt, buffer);
                     }
 
@@ -113,7 +124,7 @@ internal sealed class InteractiveLineReader
                 {
                     ExitHistoryNavigation(buffer, ref historySnapshot, ref historyIndex, ref draftBeforeHistoryNavigation);
                     if (TryComplete(
-                        buffer.ToString(),
+                        buffer.Text,
                         getWorkingDirectory,
                         getCommands,
                         getAliases,
@@ -146,6 +157,50 @@ internal sealed class InteractiveLineReader
                     continue;
                 }
 
+                if (key.Key == ConsoleKey.LeftArrow)
+                {
+                    ExitHistoryNavigation(buffer, ref historySnapshot, ref historyIndex, ref draftBeforeHistoryNavigation);
+                    if (buffer.MoveLeft())
+                    {
+                        RenderLine(prompt, buffer);
+                    }
+
+                    continue;
+                }
+
+                if (key.Key == ConsoleKey.RightArrow)
+                {
+                    ExitHistoryNavigation(buffer, ref historySnapshot, ref historyIndex, ref draftBeforeHistoryNavigation);
+                    if (buffer.MoveRight())
+                    {
+                        RenderLine(prompt, buffer);
+                    }
+
+                    continue;
+                }
+
+                if (key.Key == ConsoleKey.Home)
+                {
+                    ExitHistoryNavigation(buffer, ref historySnapshot, ref historyIndex, ref draftBeforeHistoryNavigation);
+                    if (buffer.MoveHome())
+                    {
+                        RenderLine(prompt, buffer);
+                    }
+
+                    continue;
+                }
+
+                if (key.Key == ConsoleKey.End)
+                {
+                    ExitHistoryNavigation(buffer, ref historySnapshot, ref historyIndex, ref draftBeforeHistoryNavigation);
+                    if (buffer.MoveEnd())
+                    {
+                        RenderLine(prompt, buffer);
+                    }
+
+                    continue;
+                }
+
                 var character = key.KeyChar;
                 if (character == '\0' || char.IsControl(character))
                 {
@@ -153,7 +208,7 @@ internal sealed class InteractiveLineReader
                 }
 
                 ExitHistoryNavigation(buffer, ref historySnapshot, ref historyIndex, ref draftBeforeHistoryNavigation);
-                buffer.Append(character);
+                buffer.Insert(character);
                 RenderLine(prompt, buffer);
             }
 
@@ -191,13 +246,12 @@ internal sealed class InteractiveLineReader
 
     private void ApplyCompletion(
         string prompt,
-        StringBuilder buffer,
+        LineEditBuffer buffer,
         ILineCompletionResult completion)
     {
         if (completion.UpdatedLine is not null)
         {
-            buffer.Clear();
-            buffer.Append(completion.UpdatedLine);
+            buffer.Replace(completion.UpdatedLine);
             RenderLine(prompt, buffer);
             return;
         }
@@ -217,7 +271,7 @@ internal sealed class InteractiveLineReader
     }
 
     private static bool TryMoveHistoryBackward(
-        StringBuilder buffer,
+        LineEditBuffer buffer,
         Func<IReadOnlyList<string>> getHistory,
         ref IReadOnlyList<string> historySnapshot,
         ref int? historyIndex,
@@ -231,7 +285,7 @@ internal sealed class InteractiveLineReader
                 return false;
             }
 
-            draftBeforeHistoryNavigation = buffer.ToString();
+            draftBeforeHistoryNavigation = buffer.Text;
             historyIndex = historySnapshot.Count - 1;
         }
         else if (historyIndex.Value > 0)
@@ -249,7 +303,7 @@ internal sealed class InteractiveLineReader
     }
 
     private static bool TryMoveHistoryForward(
-        StringBuilder buffer,
+        LineEditBuffer buffer,
         ref IReadOnlyList<string> historySnapshot,
         ref int? historyIndex,
         ref string draftBeforeHistoryNavigation)
@@ -274,7 +328,7 @@ internal sealed class InteractiveLineReader
     }
 
     private static void ExitHistoryNavigation(
-        StringBuilder buffer,
+        LineEditBuffer buffer,
         ref IReadOnlyList<string> historySnapshot,
         ref int? historyIndex,
         ref string draftBeforeHistoryNavigation)
@@ -286,26 +340,30 @@ internal sealed class InteractiveLineReader
 
         historyIndex = null;
         historySnapshot = [];
-        draftBeforeHistoryNavigation = buffer.ToString();
+        draftBeforeHistoryNavigation = buffer.Text;
     }
 
-    private static void ReplaceBuffer(StringBuilder buffer, string value)
+    private static void ReplaceBuffer(LineEditBuffer buffer, string value)
     {
-        buffer.Clear();
-        buffer.Append(value);
+        buffer.Replace(value);
     }
 
-    private void RenderLine(string prompt, StringBuilder buffer)
+    private void RenderLine(string prompt, LineEditBuffer buffer)
     {
-        var currentLine = prompt + buffer;
+        var currentLine = prompt + buffer.Text;
         Console.Write("\r");
         Console.Write(currentLine);
         var trailingSpaces = Math.Max(0, _previousRenderLength - currentLine.Length);
         if (trailingSpaces > 0)
         {
             Console.Write(new string(' ', trailingSpaces));
-            Console.Write("\r");
-            Console.Write(currentLine);
+        }
+
+        Console.Write("\r");
+        Console.Write(prompt);
+        if (buffer.CursorIndex > 0)
+        {
+            Console.Write(buffer.Text[..buffer.CursorIndex]);
         }
 
         _previousRenderLength = currentLine.Length;

@@ -48,6 +48,21 @@ public sealed class CommandCompletionServiceTests
     }
 
     [Fact]
+    public void CompletesBuiltInSubcommandsAfterTrailingWhitespace()
+    {
+        var result = TryComplete(
+            "repo ",
+            [
+                new CommandDescriptor("repo", "", new StubCommand(), CommandOriginKind.BuiltIn, null, null)
+            ],
+            []);
+
+        Assert.True(result.ShowCandidates);
+        Assert.Contains("add", result.Candidates);
+        Assert.Contains("status", result.Candidates);
+    }
+
+    [Fact]
     public void ShowsCandidatesForMultipleCommands()
     {
         var result = TryComplete(
