@@ -40,6 +40,17 @@ public sealed class PathCompletionServiceTests : IDisposable
     }
 
     [Fact]
+    public void CompletesFromCurrentDirectoryAfterTrailingWhitespace()
+    {
+        var workingDirectory = CreateDirectory("trailing-space");
+        File.WriteAllText(Path.Combine(workingDirectory, "README.md"), "hello");
+
+        var completed = TryComplete("cat ", workingDirectory);
+
+        Assert.Equal("cat README.md", completed.UpdatedLine);
+    }
+
+    [Fact]
     public void CompletesDirectoryAndAppendsSeparator()
     {
         var workingDirectory = CreateDirectory("dirs");
@@ -84,6 +95,17 @@ public sealed class PathCompletionServiceTests : IDisposable
         File.WriteAllText(Path.Combine(workingDirectory, "some file.txt"), "hello");
 
         var completed = TryComplete("cat \"some f", workingDirectory);
+
+        Assert.Equal("cat \"some file.txt\"", completed.UpdatedLine);
+    }
+
+    [Fact]
+    public void CompletesQuotedPathAfterTrailingWhitespace()
+    {
+        var workingDirectory = CreateDirectory("quoted-trailing");
+        File.WriteAllText(Path.Combine(workingDirectory, "some file.txt"), "hello");
+
+        var completed = TryComplete("cat \"", workingDirectory);
 
         Assert.Equal("cat \"some file.txt\"", completed.UpdatedLine);
     }

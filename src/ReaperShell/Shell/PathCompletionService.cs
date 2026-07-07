@@ -95,6 +95,12 @@ internal sealed class PathCompletionService
 
         if (tokenStart < 0)
         {
+            if (input.Any(character => !char.IsWhiteSpace(character)))
+            {
+                token = new TokenSpan(input.Length, string.Empty, '\0');
+                return true;
+            }
+
             return false;
         }
 

@@ -17,6 +17,7 @@ public sealed class ShellHost
     private readonly HashSet<string> _activeHookEvents = new(StringComparer.OrdinalIgnoreCase);
     private readonly ProcessRunner _processRunner;
     private readonly string _stateDirectory;
+    private readonly SemaphoreSlim _interactivePromptReady = new(0, 1);
     private readonly ShellSessionState _sessionState;
     private readonly ShellSettings _settings;
     private string? _currentProfilePath;
@@ -47,9 +48,6 @@ public sealed class ShellHost
         CancellationToken cancellationToken)
     {
         IsInteractiveModeEnabled = true;
-        _ = Task.Run(
-            () => ReadInteractiveInputAsync(context, _interactiveWorkItems.Writer),
-            CancellationToken.None);
 
         try
         {
@@ -62,6 +60,12 @@ public sealed class ShellHost
             }
 
             await RunHookEventAsync(context, ShellHookEventNames.Startup, cancellationToken);
+
+            SignalInteractivePromptReady();
+
+            _ = Task.Run(
+                () => ReadInteractiveInputAsync(context, _interactiveWorkItems.Writer, cancellationToken),
+                CancellationToken.None);
 
             while (!_lifetime.ExitRequested && !cancellationToken.IsCancellationRequested)
             {
@@ -90,6 +94,7 @@ public sealed class ShellHost
                     input,
                     new CommandExecutionOptions(EchoCommand: false, TriggerCommandHooks: true),
                     cancellationToken);
+                SignalInteractivePromptReady();
             }
 
             await RunHookEventAsync(context, ShellHookEventNames.ShellExit, cancellationToken);
@@ -274,7 +279,7 @@ public sealed class ShellHost
         {
             if (options.EchoCommand)
             {
-                context.WriteLine($"rsh> {input}");
+                context.WriteLine($"{FormatPrompt(context)}{input}");
             }
 
             var tokens = _commandParser.Parse(input);
@@ -519,16 +524,18 @@ public sealed class ShellHost
 
     private async Task ReadInteractiveInputAsync(
         ShellContext context,
-        ChannelWriter<InteractiveWorkItem> writer)
+        ChannelWriter<InteractiveWorkItem> writer,
+        CancellationToken cancellationToken)
     {
         var lineReader = new InteractiveLineReader();
         try
         {
             while (true)
             {
+                await _interactivePromptReady.WaitAsync(cancellationToken);
                 var prompt = FormatPrompt(context);
-                var input = await lineReader.ReadLineAsync(prompt, () => context.WorkingDirectory);
-                await writer.WriteAsync(new InteractiveWorkItem(input, null));
+                var input = await lineReader.ReadLineAsync(prompt, () => context.WorkingDirectory, cancellationToken);
+                await writer.WriteAsync(new InteractiveWorkItem(input, null), cancellationToken);
                 if (input is null)
                 {
                     break;
@@ -538,6 +545,14 @@ public sealed class ShellHost
         finally
         {
             writer.TryComplete();
+        }
+    }
+
+    private void SignalInteractivePromptReady()
+    {
+        if (_interactivePromptReady.CurrentCount == 0)
+        {
+            _interactivePromptReady.Release();
         }
     }
 

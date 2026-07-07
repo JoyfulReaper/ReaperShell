@@ -22,6 +22,16 @@ public sealed class ShellContext
         TextWriter error,
         DirectoryInfo workingDirectory,
         IServiceProvider? services,
+        CancellationToken cancellationToken)
+        : this(@out, error, workingDirectory, services, cancellationToken, ShellColorMode.Auto)
+    {
+    }
+
+    public ShellContext(
+        TextWriter @out,
+        TextWriter error,
+        DirectoryInfo workingDirectory,
+        IServiceProvider? services,
         CancellationToken cancellationToken,
         ShellColorMode colorMode = ShellColorMode.Auto)
     {
