@@ -27,6 +27,15 @@ internal sealed class RepoGitService
 
         if (!repo.IsGitRepo)
         {
+            if (HasGitMetadata(repo.LocalPath))
+            {
+                context.WriteLine(
+                    "This repo has a local .git directory, but ReaperShell still tracks it as a local non-git command pack.");
+                context.WriteLine(
+                    "Use `repo publish <name> <owner/repo>` to finish publishing it, or update/remove/re-add the repo if this was intentional.");
+                return 0;
+            }
+
             context.WriteLine("This repo is a local non-git command pack.");
             return 0;
         }
@@ -259,6 +268,12 @@ internal sealed class RepoGitService
         var combinedOutput = $"{result.StandardOutput}\n{result.StandardError}";
         return combinedOutput.Contains("nothing to commit", StringComparison.OrdinalIgnoreCase) ||
                combinedOutput.Contains("no changes added to commit", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool HasGitMetadata(string repoPath)
+    {
+        return Directory.Exists(Path.Combine(repoPath, ".git")) ||
+               File.Exists(Path.Combine(repoPath, ".git"));
     }
 }
 

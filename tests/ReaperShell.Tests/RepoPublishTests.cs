@@ -13,6 +13,7 @@ public sealed class RepoPublishTests : IAsyncLifetime
     private readonly string _root = Path.Combine(Path.GetTempPath(), "ReaperShell.RepoPublishTests", Guid.NewGuid().ToString("N"));
     private readonly string _helperRoot = Path.Combine(Path.GetTempPath(), "ReaperShell.RepoPublishTests.gh", Guid.NewGuid().ToString("N"));
     private string _ghExecutablePath = string.Empty;
+    private string _gitExecutablePath = string.Empty;
 
     public async Task InitializeAsync()
     {
@@ -46,13 +47,29 @@ using System.Text.Json;
 var captureFile = Environment.GetEnvironmentVariable("GH_CAPTURE_FILE");
 if (!string.IsNullOrWhiteSpace(captureFile))
 {
-    await File.WriteAllTextAsync(
+    await File.AppendAllTextAsync(
         captureFile,
         JsonSerializer.Serialize(new
         {
             cwd = Directory.GetCurrentDirectory(),
             args = args.ToArray()
-        }));
+        }) + Environment.NewLine);
+}
+
+var exitCodeText = Environment.GetEnvironmentVariable("GH_EXIT_CODE");
+if (!string.IsNullOrWhiteSpace(exitCodeText) && int.TryParse(exitCodeText, out var exitCode) && exitCode != 0)
+{
+    var message = Environment.GetEnvironmentVariable("GH_FAIL_MESSAGE");
+    if (!string.IsNullOrWhiteSpace(message))
+    {
+        Console.Error.WriteLine(message);
+    }
+    else
+    {
+        Console.Error.WriteLine("GH_HELPER_FAILURE");
+    }
+
+    return exitCode;
 }
 
 Console.Out.WriteLine("GH_HELPER_STDOUT");
@@ -60,8 +77,18 @@ Console.Error.WriteLine("GH_HELPER_STDERR");
 return 0;
 """);
 
-        await RunProcessAsync("dotnet", ["build", helperProjectPath, "--nologo"], _helperRoot);
+        var buildResult = await RunProcessAsync("dotnet", ["build", helperProjectPath, "--nologo"], _helperRoot);
+        if (buildResult.ExitCode != 0)
+        {
+            throw new InvalidOperationException(
+                $"Failed to build gh helper: {buildResult.StdOut}\n{buildResult.StdErr}");
+        }
         _ghExecutablePath = Path.Combine(_helperRoot, "bin", "Debug", "net10.0", OperatingSystem.IsWindows() ? "gh.exe" : "gh");
+
+        if (!ExternalCommandResolver.TryResolveExecutable("git", out _gitExecutablePath))
+        {
+            throw new InvalidOperationException("Git was not found on PATH, so RepoPublishTests cannot run.");
+        }
     }
 
     public Task DisposeAsync()
@@ -119,6 +146,8 @@ return 0;
 
         Assert.Equal(1, result.ExitCode);
         Assert.Contains("already Git-backed", result.StdErr);
+        Assert.Contains("repo push", result.StdErr);
+        Assert.Contains("repo save", result.StdErr);
     }
 
     [Fact]
@@ -142,45 +171,138 @@ return 0;
     }
 
     [Fact]
-    public async Task PublishBuildsGhCommandAndUpdatesRepoSettings()
+    public async Task PublishBootstrapsNonGitPackBeforeGh()
     {
         var settings = await CreateSettingsAsync("local-repo");
-        var captureFile = Path.Combine(_root, "gh-capture.json");
+        var captureFile = Path.Combine(_root, "gh-capture-non-git.jsonl");
+        using var environment = CreatePublishEnvironmentScope(captureFile);
+
+        var result = await RunPublishAsync(settings, "publish", "local-repo", "octocat/widget", "--public");
+
+        Assert.Equal(0, result.ExitCode);
+        Assert.Contains("Published repo 'local-repo' to octocat/widget.", result.StdOut);
+        Assert.True(settings.Repos["local-repo"].IsGitRepo);
+        Assert.Equal("octocat/widget", settings.Repos["local-repo"].Source);
+        Assert.True(Directory.Exists(Path.Combine(settings.Repos["local-repo"].LocalPath, ".git")));
+        Assert.Equal("1", (await RunGitAsync(settings.Repos["local-repo"].LocalPath, "rev-list", "--count", "HEAD")).StdOut.Trim());
+
+        var capture = ReadCaptureLines(captureFile);
+        Assert.Single(capture);
+        Assert.Equal(new[]
+        {
+            "repo",
+            "create",
+            "octocat/widget",
+            "--source",
+            settings.Repos["local-repo"].LocalPath,
+            "--push",
+            "--public",
+            "--remote",
+            "origin"
+        }, capture[0].args);
+    }
+
+    [Fact]
+    public async Task PublishBootstrapsExistingGitDirWithoutCommits()
+    {
+        var repoRoot = await CreatePackRootAsync("git-no-commit");
+        await RunGitAsync(repoRoot, "init");
+        var settings = await CreateSettingsAsync("git-no-commit", repoRoot);
+
+        var captureFile = Path.Combine(_root, "gh-capture-no-commit.jsonl");
+        using var environment = CreatePublishEnvironmentScope(captureFile);
+
+        var result = await RunPublishAsync(settings, "publish", "git-no-commit", "octocat/widget");
+
+        Assert.Equal(0, result.ExitCode);
+        Assert.DoesNotContain("Reinitialized existing Git repository", result.StdOut + result.StdErr, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal("1", (await RunGitAsync(repoRoot, "rev-list", "--count", "HEAD")).StdOut.Trim());
+
+        var capture = ReadCaptureLines(captureFile);
+        Assert.Single(capture);
+        Assert.Equal(new[]
+        {
+            "repo",
+            "create",
+            "octocat/widget",
+            "--source",
+            repoRoot,
+            "--push",
+            "--private",
+            "--remote",
+            "origin"
+        }, capture[0].args);
+    }
+
+    [Fact]
+    public async Task PublishDoesNotReinitializeCommittedPack()
+    {
+        var repoRoot = await CreatePackRootAsync("git-with-commit");
+        await RunGitAsync(repoRoot, "init");
+        await RunGitAsync(repoRoot, "add", ".");
+        await RunGitAsync(repoRoot, "commit", "-m", "Seed commit");
+        var commitBeforePublish = (await RunGitAsync(repoRoot, "rev-parse", "HEAD")).StdOut.Trim();
+        var settings = await CreateSettingsAsync("git-with-commit", repoRoot);
+
+        var captureFile = Path.Combine(_root, "gh-capture-with-commit.jsonl");
+        using var environment = CreatePublishEnvironmentScope(captureFile);
+
+        var result = await RunPublishAsync(settings, "publish", "git-with-commit", "octocat/widget", "--public");
+
+        Assert.Equal(0, result.ExitCode);
+        Assert.DoesNotContain("Reinitialized existing Git repository", result.StdOut + result.StdErr, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(commitBeforePublish, (await RunGitAsync(repoRoot, "rev-parse", "HEAD")).StdOut.Trim());
+
+        var capture = ReadCaptureLines(captureFile);
+        Assert.Single(capture);
+        Assert.Equal(new[]
+        {
+            "repo",
+            "create",
+            "octocat/widget",
+            "--source",
+            repoRoot,
+            "--push",
+            "--public",
+            "--remote",
+            "origin"
+        }, capture[0].args);
+    }
+
+    [Fact]
+    public async Task PublishLeavesLocalSettingsUnchangedWhenGhFails()
+    {
+        var settings = await CreateSettingsAsync("local-repo");
+        using var environment = CreatePublishEnvironmentScope(
+            Path.Combine(_root, "gh-fail.jsonl"),
+            ghExitCode: "5",
+            ghFailMessage: "GH_AUTH_REQUIRED");
+
+        var result = await RunPublishAsync(settings, "publish", "local-repo", "octocat/widget");
+
+        Assert.Equal(5, result.ExitCode);
+        Assert.Contains("GH_AUTH_REQUIRED", result.StdErr);
+        Assert.False(settings.Repos["local-repo"].IsGitRepo);
+        Assert.Equal(settings.Repos["local-repo"].LocalPath, settings.Repos["local-repo"].Source);
+    }
+
+    [Fact]
+    public async Task MissingGitFailsClearly()
+    {
+        var settings = await CreateSettingsAsync("local-repo");
         var originalPath = Environment.GetEnvironmentVariable("PATH");
-        var originalCapture = Environment.GetEnvironmentVariable("GH_CAPTURE_FILE");
 
         try
         {
-            Environment.SetEnvironmentVariable("PATH", Path.GetDirectoryName(_ghExecutablePath)! + Path.PathSeparator + originalPath);
-            Environment.SetEnvironmentVariable("GH_CAPTURE_FILE", captureFile);
+            Environment.SetEnvironmentVariable("PATH", Path.GetDirectoryName(_ghExecutablePath));
+            var result = await RunPublishAsync(settings, "publish", "local-repo", "octocat/widget");
 
-            var result = await RunPublishAsync(settings, "publish", "local-repo", "octocat/widget", "--public");
-
-            Assert.Equal(0, result.ExitCode);
-            Assert.Contains("Published repo 'local-repo' to octocat/widget.", result.StdOut);
-            Assert.Contains("repo status local-repo", result.StdOut);
-            Assert.Contains("repo save local-repo \"message\"", result.StdOut);
-            Assert.True(settings.Repos["local-repo"].IsGitRepo);
-            Assert.Equal("octocat/widget", settings.Repos["local-repo"].Source);
-
-            var capture = JsonDocument.Parse(await File.ReadAllTextAsync(captureFile));
-            Assert.Equal(new[]
-            {
-                "repo",
-                "create",
-                "octocat/widget",
-                "--source",
-                settings.Repos["local-repo"].LocalPath,
-                "--remote",
-                "origin",
-                "--push",
-                "--public"
-            }, capture.RootElement.GetProperty("args").EnumerateArray().Select(element => element.GetString()).ToArray());
+            Assert.Equal(1, result.ExitCode);
+            Assert.Contains("Git 'git' was not found. Install it first.", result.StdErr);
         }
         finally
         {
             Environment.SetEnvironmentVariable("PATH", originalPath);
-            Environment.SetEnvironmentVariable("GH_CAPTURE_FILE", originalCapture);
         }
     }
 
@@ -204,6 +326,74 @@ return 0;
         }
     }
 
+    [Fact]
+    public async Task ExistingOriginPointingElsewhereFailsClearly()
+    {
+        var repoRoot = await CreatePackRootAsync("origin-mismatch");
+        await RunGitAsync(repoRoot, "init");
+        await RunGitAsync(repoRoot, "add", ".");
+        await RunGitAsync(repoRoot, "commit", "-m", "Seed commit");
+        await RunGitAsync(repoRoot, "remote", "add", "origin", "https://example.com/other/repo.git");
+        var settings = await CreateSettingsAsync("origin-mismatch", repoRoot);
+
+        var captureFile = Path.Combine(_root, "gh-origin-mismatch.jsonl");
+        using var environment = CreatePublishEnvironmentScope(captureFile);
+
+        var result = await RunPublishAsync(settings, "publish", "origin-mismatch", "octocat/widget");
+
+        Assert.Equal(1, result.ExitCode);
+        Assert.Contains("origin remote", result.StdErr, StringComparison.OrdinalIgnoreCase);
+        Assert.False(File.Exists(captureFile));
+        Assert.False(settings.Repos["origin-mismatch"].IsGitRepo);
+    }
+
+    [Fact]
+    public async Task ExistingOriginPointingToRequestedRepoIsAccepted()
+    {
+        var repoRoot = await CreatePackRootAsync("origin-match");
+        await RunGitAsync(repoRoot, "init");
+        await RunGitAsync(repoRoot, "add", ".");
+        await RunGitAsync(repoRoot, "commit", "-m", "Seed commit");
+        await RunGitAsync(repoRoot, "remote", "add", "origin", "https://github.com/JoyfulReaper/reapershell-iis-tools.git");
+        var settings = await CreateSettingsAsync("origin-match", repoRoot);
+
+        var captureFile = Path.Combine(_root, "gh-origin-match.jsonl");
+        using var environment = CreatePublishEnvironmentScope(captureFile);
+
+        var result = await RunPublishAsync(settings, "publish", "origin-match", "JoyfulReaper/reapershell-iis-tools", "--private");
+
+        Assert.Equal(0, result.ExitCode);
+        var capture = ReadCaptureLines(captureFile);
+        Assert.Single(capture);
+        Assert.Equal(new[]
+        {
+            "repo",
+            "create",
+            "JoyfulReaper/reapershell-iis-tools",
+            "--source",
+            repoRoot,
+            "--push",
+            "--private"
+        }, capture[0].args);
+        Assert.True(settings.Repos["origin-match"].IsGitRepo);
+        Assert.Equal("JoyfulReaper/reapershell-iis-tools", settings.Repos["origin-match"].Source);
+    }
+
+    [Fact]
+    public async Task StatusReportsHalfState()
+    {
+        var repoRoot = await CreatePackRootAsync("half-state");
+        await RunGitAsync(repoRoot, "init");
+        var settings = await CreateSettingsAsync("half-state", repoRoot);
+
+        var result = await RunStatusAsync(settings, "status", "half-state");
+
+        Assert.Equal(0, result.ExitCode);
+        Assert.Contains("has a local .git directory", result.StdOut);
+        Assert.Contains("Use `repo publish <name> <owner/repo>` to finish publishing it", result.StdOut);
+        Assert.Contains("update/remove/re-add the repo", result.StdOut);
+    }
+
     private async Task<CommandResult> RunPublishAsync(params string[] args)
     {
         var settings = await CreateSettingsAsync("local-repo");
@@ -211,6 +401,17 @@ return 0;
     }
 
     private async Task<CommandResult> RunPublishAsync(ShellSettings settings, params string[] args)
+    {
+        var repoCommand = CreateRepoCommand(settings);
+        var stdout = new StringWriter();
+        var stderr = new StringWriter();
+        var context = new ShellContext(stdout, stderr, new DirectoryInfo(_root), services: null, CancellationToken.None);
+
+        var exitCode = await repoCommand.ExecuteAsync(context, args, CancellationToken.None);
+        return new CommandResult(exitCode, stdout.ToString(), stderr.ToString());
+    }
+
+    private async Task<CommandResult> RunStatusAsync(ShellSettings settings, params string[] args)
     {
         var repoCommand = CreateRepoCommand(settings);
         var stdout = new StringWriter();
@@ -261,18 +462,109 @@ return 0;
         return settings;
     }
 
-    private static async Task RunProcessAsync(string fileName, IReadOnlyList<string> arguments, string workingDirectory)
+    private async Task<string> CreatePackRootAsync(string repoName)
+    {
+        var repoRoot = Path.Combine(_root, repoName);
+        Directory.CreateDirectory(repoRoot);
+        await new CommandPackManifest
+        {
+            Id = repoName,
+            Name = $"{repoName} Pack",
+            Description = $"Generated repo '{repoName}'.",
+            CommandsPath = "commands"
+        }.SaveAsync(Path.Combine(repoRoot, "shellpack.json"), CancellationToken.None);
+        return repoRoot;
+    }
+
+    private async Task<CommandResult> RunGitAsync(string workingDirectory, params string[] arguments)
+    {
+        return await RunProcessAsync(_gitExecutablePath, arguments, workingDirectory, CreateGitIdentityEnvironment());
+    }
+
+    private static Dictionary<string, string?> CreateGitIdentityEnvironment()
+    {
+        return new Dictionary<string, string?>
+        {
+            ["GIT_AUTHOR_NAME"] = "ReaperShell Test",
+            ["GIT_AUTHOR_EMAIL"] = "reapershell-test@example.com",
+            ["GIT_COMMITTER_NAME"] = "ReaperShell Test",
+            ["GIT_COMMITTER_EMAIL"] = "reapershell-test@example.com"
+        };
+    }
+
+    private static string PrependPath(string entry, string? originalPath)
+    {
+        return string.IsNullOrWhiteSpace(originalPath)
+            ? entry
+            : entry + Path.PathSeparator + originalPath;
+    }
+
+    private EnvironmentScope CreatePublishEnvironmentScope(
+        string captureFile,
+        string? ghExitCode = null,
+        string? ghFailMessage = null)
+    {
+        var scope = new EnvironmentScope()
+            .Set("PATH", PrependPath(Path.GetDirectoryName(_ghExecutablePath)!, Environment.GetEnvironmentVariable("PATH")))
+            .Set("GH_CAPTURE_FILE", captureFile)
+            .Set("GIT_AUTHOR_NAME", "ReaperShell Test")
+            .Set("GIT_AUTHOR_EMAIL", "reapershell-test@example.com")
+            .Set("GIT_COMMITTER_NAME", "ReaperShell Test")
+            .Set("GIT_COMMITTER_EMAIL", "reapershell-test@example.com");
+
+        if (ghExitCode is not null)
+        {
+            scope.Set("GH_EXIT_CODE", ghExitCode);
+        }
+
+        if (ghFailMessage is not null)
+        {
+            scope.Set("GH_FAIL_MESSAGE", ghFailMessage);
+        }
+
+        return scope;
+    }
+
+    private static IReadOnlyList<(string cwd, string[] args)> ReadCaptureLines(string captureFile)
+    {
+        return File.ReadAllLines(captureFile)
+            .Where(line => !string.IsNullOrWhiteSpace(line))
+            .Select(line =>
+            {
+                using var document = JsonDocument.Parse(line);
+                var cwd = document.RootElement.GetProperty("cwd").GetString() ?? string.Empty;
+                var args = document.RootElement.GetProperty("args").EnumerateArray().Select(element => element.GetString() ?? string.Empty).ToArray();
+                return (cwd, args);
+            })
+            .ToArray();
+    }
+
+    private static async Task<CommandResult> RunProcessAsync(
+        string fileName,
+        IReadOnlyList<string> arguments,
+        string workingDirectory,
+        IReadOnlyDictionary<string, string?>? environmentVariables = null)
     {
         var startInfo = new ProcessStartInfo
         {
             FileName = fileName,
             WorkingDirectory = workingDirectory,
-            UseShellExecute = false
+            UseShellExecute = false,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true
         };
 
         foreach (var argument in arguments)
         {
             startInfo.ArgumentList.Add(argument);
+        }
+
+        if (environmentVariables is not null)
+        {
+            foreach (var pair in environmentVariables)
+            {
+                startInfo.Environment[pair.Key] = pair.Value;
+            }
         }
 
         using var process = new Process { StartInfo = startInfo };
@@ -281,12 +573,36 @@ return 0;
             throw new InvalidOperationException($"Failed to start '{fileName}'.");
         }
 
+        var standardOutput = await process.StandardOutput.ReadToEndAsync();
+        var standardError = await process.StandardError.ReadToEndAsync();
         await process.WaitForExitAsync();
-        if (process.ExitCode != 0)
-        {
-            throw new InvalidOperationException($"'{fileName}' exited with {process.ExitCode}.");
-        }
+
+        return new CommandResult(process.ExitCode, standardOutput, standardError);
     }
 
     private sealed record CommandResult(int ExitCode, string StdOut, string StdErr);
+
+    private sealed class EnvironmentScope : IDisposable
+    {
+        private readonly List<(string Name, string? Value)> _values = [];
+
+        public EnvironmentScope Set(string name, string? value)
+        {
+            if (_values.All(entry => !string.Equals(entry.Name, name, StringComparison.OrdinalIgnoreCase)))
+            {
+                _values.Add((name, Environment.GetEnvironmentVariable(name)));
+            }
+
+            Environment.SetEnvironmentVariable(name, value);
+            return this;
+        }
+
+        public void Dispose()
+        {
+            for (var index = _values.Count - 1; index >= 0; index--)
+            {
+                Environment.SetEnvironmentVariable(_values[index].Name, _values[index].Value);
+            }
+        }
+    }
 }
