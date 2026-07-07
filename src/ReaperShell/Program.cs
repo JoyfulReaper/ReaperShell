@@ -49,7 +49,7 @@ internal static class Program
         var watchService = new ShellWatchService(host);
         var editorLauncher = new EditorLauncher(settings, processRunner);
 
-        RegisterBuiltIns(
+        var repoCommand = RegisterBuiltIns(
             registry,
             settings,
             sessionState,
@@ -71,6 +71,7 @@ internal static class Program
 
         var defaultProfilePath = Path.Combine(stateDirectory, "profile.rsh");
         await EnsureDefaultProfileExistsAsync(defaultProfilePath);
+        await repoCommand.AutoLoadTrustedReposAsync(context, CancellationToken.None);
         var shouldRunProfile =
             !options.NoProfile &&
             (options.ProfilePath is not null || options.ScriptPath is null && options.CommandText is null);
@@ -111,7 +112,7 @@ internal static class Program
             CancellationToken.None);
     }
 
-    private static void RegisterBuiltIns(
+    private static RepoCommand RegisterBuiltIns(
         CommandRegistry registry,
         ShellSettings settings,
         ShellSessionState sessionState,
@@ -168,16 +169,17 @@ internal static class Program
         registry.RegisterBuiltIn(new FortuneCommand());
         registry.RegisterBuiltIn(new PrayCommand());
         registry.RegisterBuiltIn(new ReloadCommand(host));
-        registry.RegisterBuiltIn(
-            new RepoCommand(
-                settings,
-                processRunner,
-                commandPackManager,
-                host,
-                watchService,
-                workspaceRoot,
-                stateDirectory));
+        var repoCommand = new RepoCommand(
+            settings,
+            processRunner,
+            commandPackManager,
+            host,
+            watchService,
+            workspaceRoot,
+            stateDirectory);
+        registry.RegisterBuiltIn(repoCommand);
         registry.RegisterBuiltIn(new PluginsCommand(commandPackManager));
+        return repoCommand;
     }
 
     private static async Task<ShellSettings> LoadSettingsAsync(string stateDirectory)

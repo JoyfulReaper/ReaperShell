@@ -27,6 +27,7 @@ internal sealed class RepoGitService
 
         if (!repo.IsGitRepo)
         {
+            WriteRepoStateSummary(context, repo);
             if (HasGitMetadata(repo.LocalPath))
             {
                 context.WriteLine(
@@ -39,6 +40,8 @@ internal sealed class RepoGitService
             context.WriteLine("This repo is a local non-git command pack.");
             return 0;
         }
+
+        WriteRepoStateSummary(context, repo);
 
         var result = await RunGitAsync(
             repo.Name,
@@ -274,6 +277,13 @@ internal sealed class RepoGitService
     {
         return Directory.Exists(Path.Combine(repoPath, ".git")) ||
                File.Exists(Path.Combine(repoPath, ".git"));
+    }
+
+    private void WriteRepoStateSummary(ShellContext context, CommandRepoSettings repo)
+    {
+        context.WriteLine($"Trusted: {(repo.Trusted ? "yes" : "no")}");
+        context.WriteLine($"Autoload: {(repo.AutoLoad ? "yes" : "no")}");
+        context.WriteLine($"Profile load: {(_registry.HasProfileLoadLine(repo.Name) ? "yes" : "no")}");
     }
 }
 

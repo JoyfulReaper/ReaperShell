@@ -52,6 +52,50 @@ internal sealed class RepoLifecycleService
         return await LoadRepoAsync(context, repo, cancellationToken);
     }
 
+    internal async Task<int> AutoLoadTrustedReposAsync(
+        ShellContext context,
+        CancellationToken cancellationToken)
+    {
+        var correctedInvalidAutoLoad = false;
+        foreach (var repo in _settings.Repos.Values.Where(repo => repo.AutoLoad && !repo.Trusted))
+        {
+            context.WriteErrorLine(
+                $"Skipping auto-load for untrusted repo '{repo.Name}'. AutoLoad was cleared.");
+            repo.AutoLoad = false;
+            correctedInvalidAutoLoad = true;
+        }
+
+        if (correctedInvalidAutoLoad)
+        {
+            await _registry.SaveSettingsAsync(cancellationToken);
+        }
+
+        var autoLoadRepos = _settings
+            .Repos.Values
+            .Where(repo => repo.Trusted && repo.AutoLoad)
+            .OrderBy(repo => repo.Name, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        foreach (var repo in autoLoadRepos)
+        {
+            if (_commandPackManager.IsLoaded(repo.Name))
+            {
+                context.WriteLine($"Skipping auto-load for trusted repo '{repo.Name}' because it is already loaded.");
+                continue;
+            }
+
+            context.WriteLine($"Auto-loading trusted repo '{repo.Name}'...");
+            var loadExitCode = await LoadRepoAsync(context, repo, cancellationToken);
+            if (loadExitCode != 0)
+            {
+                context.WriteErrorLine(
+                    $"Failed to auto-load trusted repo '{repo.Name}'. Run `repo load {repo.Name}` for details.");
+            }
+        }
+
+        return 0;
+    }
+
     public async Task<int> UnloadAsync(
         ShellContext context,
         IReadOnlyList<string> args,
@@ -205,11 +249,17 @@ internal sealed class RepoLifecycleService
         return result.ExitCode;
     }
 
-    private async Task<int> LoadRepoAsync(
+    internal async Task<int> LoadRepoAsync(
         ShellContext context,
         CommandRepoSettings repo,
         CancellationToken cancellationToken)
     {
+        if (_commandPackManager.IsLoaded(repo.Name))
+        {
+            context.WriteLine($"Repo '{repo.Name}' is already loaded.");
+            return 0;
+        }
+
         return await LoadRepoAsync(context, repo, cancellationToken, triggerLoadedHook: true);
     }
 

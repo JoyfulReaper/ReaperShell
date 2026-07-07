@@ -37,6 +37,7 @@ public sealed class RepoCommand : IShellCommand
             settings,
             _gitService,
             _registryService);
+        _registryService.SetLoadRepoAction(_lifecycleService.LoadRepoAsync);
         _shellHost = shellHost;
         _watchService = watchService;
     }
@@ -88,6 +89,11 @@ public sealed class RepoCommand : IShellCommand
             "watch-list" => WatchListAsync(context, args),
             _ => Task.FromResult(WriteUsage(context))
         };
+    }
+
+    internal Task<int> AutoLoadTrustedReposAsync(ShellContext context, CancellationToken cancellationToken)
+    {
+        return _lifecycleService.AutoLoadTrustedReposAsync(context, cancellationToken);
     }
 
     private async Task<int> RemoveAsync(
