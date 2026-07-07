@@ -69,7 +69,10 @@ public sealed class RepoCommand : IShellCommand
             "trust" => _registryService.TrustAsync(context, args, cancellationToken),
             "untrust" => _registryService.UntrustAsync(context, args, cancellationToken),
             "status" => _gitService.StatusAsync(context, args, cancellationToken),
+            "branches" => _gitService.BranchesAsync(context, args, cancellationToken),
             "sync" => _gitService.SyncAsync(context, args, cancellationToken),
+            "switch" => _gitService.SwitchAsync(context, args, cancellationToken),
+            "pull" => _gitService.PullAsync(context, args, cancellationToken),
             "build" => _lifecycleService.BuildAsync(context, args, cancellationToken),
             "load" => _lifecycleService.LoadAsync(context, args, cancellationToken),
             "unload" => _lifecycleService.UnloadAsync(context, args, cancellationToken),
@@ -270,7 +273,7 @@ public sealed class RepoCommand : IShellCommand
     private static int WriteUsage(ShellContext context)
     {
         context.WriteErrorLine(
-            "Usage: repo <add|list|prune-duplicates|trust|untrust|status|sync|build|load|unload|reload|new|remove|commit|push|publish|save|build-all|load-all|reload-all|autosync|watch|unwatch|watch-list> ...");
+            "Usage: repo <add|list|prune-duplicates|trust|untrust|status|branches|sync|switch|pull|build|load|unload|reload|new|remove|commit|push|publish|save|build-all|load-all|reload-all|autosync|watch|unwatch|watch-list> ...");
         return 1;
     }
 }

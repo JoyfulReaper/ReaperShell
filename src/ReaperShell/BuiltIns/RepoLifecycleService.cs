@@ -214,6 +214,15 @@ internal sealed class RepoLifecycleService
             return 1;
         }
 
+        if (repo.IsGitRepo)
+        {
+            var bannerExitCode = await _gitService.WriteBuildBannerAsync(context, repo, cancellationToken);
+            if (bannerExitCode != 0)
+            {
+                return bannerExitCode;
+            }
+        }
+
         var result = await _commandPackManager.BuildAsync(
             repo,
             _settings.DefaultConfiguration,

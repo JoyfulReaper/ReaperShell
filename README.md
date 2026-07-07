@@ -168,6 +168,9 @@ Core lifecycle:
 Git-backed workflows:
 
 - `repo status <name>` runs `git status --short`
+- `repo branches <name>` lists local and remote branches for a Git-backed repo
+- `repo switch <name> <branch> [--force]` switches branches, creating a tracking branch when needed
+- `repo pull <name>` runs `git pull --ff-only`
 - `repo sync <name>` runs `git pull --rebase`
 - `repo commit <name> "message"` stages and commits changes
 - `repo push <name>` pushes the repo
@@ -179,6 +182,8 @@ Bulk operations:
 - `repo build-all` builds all trusted repos
 - `repo load-all` loads all trusted repos that are not already loaded
 - `repo reload-all` reloads all trusted repos
+
+When you run `repo status` or `repo branches` against a Git-backed repo, ReaperShell also shows the current branch, upstream, commit, and known remote branches so it is easier to see what is actually checked out before you reload or build.
 
 Watch and auto-sync:
 
