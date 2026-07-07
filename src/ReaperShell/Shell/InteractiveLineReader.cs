@@ -14,16 +14,17 @@ internal sealed class InteractiveLineReader
     public Task<string?> ReadLineAsync(
         string prompt,
         Func<DirectoryInfo> getWorkingDirectory,
+        Func<IReadOnlyList<string>> getHistory,
         CancellationToken cancellationToken = default)
     {
-        if (Console.IsInputRedirected || Console.IsOutputRedirected)
+        if (Console.IsInputRedirected)
         {
             return Task.FromResult(Console.ReadLine());
         }
 
         try
         {
-            return Task.FromResult(ReadInteractiveLine(prompt, getWorkingDirectory, cancellationToken));
+            return Task.FromResult(ReadInteractiveLine(prompt, getWorkingDirectory, getHistory, cancellationToken));
         }
         catch (InvalidOperationException)
         {
@@ -38,6 +39,7 @@ internal sealed class InteractiveLineReader
     private string? ReadInteractiveLine(
         string prompt,
         Func<DirectoryInfo> getWorkingDirectory,
+        Func<IReadOnlyList<string>> getHistory,
         CancellationToken cancellationToken)
     {
         var originalTreatControlCAsInput = Console.TreatControlCAsInput;
@@ -46,6 +48,9 @@ internal sealed class InteractiveLineReader
         try
         {
             var buffer = new StringBuilder();
+            IReadOnlyList<string> historySnapshot = [];
+            int? historyIndex = null;
+            string draftBeforeHistoryNavigation = string.Empty;
             RenderLine(prompt, buffer);
 
             while (!cancellationToken.IsCancellationRequested)
@@ -57,10 +62,12 @@ internal sealed class InteractiveLineReader
                     if (key.Key == ConsoleKey.C)
                     {
                         buffer.Clear();
+                        ExitHistoryNavigation(buffer, ref historySnapshot, ref historyIndex, ref draftBeforeHistoryNavigation);
                         RenderLine(prompt, buffer);
                         continue;
                     }
 
+                    ExitHistoryNavigation(buffer, ref historySnapshot, ref historyIndex, ref draftBeforeHistoryNavigation);
                     if (buffer.Length == 0)
                     {
                         Console.WriteLine();
@@ -76,6 +83,7 @@ internal sealed class InteractiveLineReader
 
                 if (key.Key == ConsoleKey.Backspace)
                 {
+                    ExitHistoryNavigation(buffer, ref historySnapshot, ref historyIndex, ref draftBeforeHistoryNavigation);
                     if (buffer.Length > 0)
                     {
                         buffer.Length--;
@@ -87,6 +95,7 @@ internal sealed class InteractiveLineReader
 
                 if (key.Key == ConsoleKey.Tab)
                 {
+                    ExitHistoryNavigation(buffer, ref historySnapshot, ref historyIndex, ref draftBeforeHistoryNavigation);
                     if (_pathCompletionService.TryComplete(buffer.ToString(), getWorkingDirectory, out var completion))
                     {
                         if (completion is not null && completion.UpdatedLine is not null)
@@ -110,12 +119,33 @@ internal sealed class InteractiveLineReader
                     continue;
                 }
 
+                if (key.Key == ConsoleKey.UpArrow)
+                {
+                    if (TryMoveHistoryBackward(buffer, getHistory, ref historySnapshot, ref historyIndex, ref draftBeforeHistoryNavigation))
+                    {
+                        RenderLine(prompt, buffer);
+                    }
+
+                    continue;
+                }
+
+                if (key.Key == ConsoleKey.DownArrow)
+                {
+                    if (TryMoveHistoryForward(buffer, ref historySnapshot, ref historyIndex, ref draftBeforeHistoryNavigation))
+                    {
+                        RenderLine(prompt, buffer);
+                    }
+
+                    continue;
+                }
+
                 var character = key.KeyChar;
                 if (character == '\0' || char.IsControl(character))
                 {
                     continue;
                 }
 
+                ExitHistoryNavigation(buffer, ref historySnapshot, ref historyIndex, ref draftBeforeHistoryNavigation);
                 buffer.Append(character);
                 RenderLine(prompt, buffer);
             }
@@ -127,6 +157,85 @@ internal sealed class InteractiveLineReader
         {
             Console.TreatControlCAsInput = originalTreatControlCAsInput;
         }
+    }
+
+    private static bool TryMoveHistoryBackward(
+        StringBuilder buffer,
+        Func<IReadOnlyList<string>> getHistory,
+        ref IReadOnlyList<string> historySnapshot,
+        ref int? historyIndex,
+        ref string draftBeforeHistoryNavigation)
+    {
+        if (historyIndex is null)
+        {
+            historySnapshot = getHistory();
+            if (historySnapshot.Count == 0)
+            {
+                return false;
+            }
+
+            draftBeforeHistoryNavigation = buffer.ToString();
+            historyIndex = historySnapshot.Count - 1;
+        }
+        else if (historyIndex.Value > 0)
+        {
+            historyIndex--;
+        }
+
+        if (historyIndex is null)
+        {
+            return false;
+        }
+
+        ReplaceBuffer(buffer, historySnapshot[historyIndex.Value]);
+        return true;
+    }
+
+    private static bool TryMoveHistoryForward(
+        StringBuilder buffer,
+        ref IReadOnlyList<string> historySnapshot,
+        ref int? historyIndex,
+        ref string draftBeforeHistoryNavigation)
+    {
+        if (historyIndex is null)
+        {
+            return false;
+        }
+
+        if (historyIndex.Value < historySnapshot.Count - 1)
+        {
+            historyIndex++;
+            ReplaceBuffer(buffer, historySnapshot[historyIndex.Value]);
+            return true;
+        }
+
+        ReplaceBuffer(buffer, draftBeforeHistoryNavigation);
+        historyIndex = null;
+        historySnapshot = [];
+        draftBeforeHistoryNavigation = string.Empty;
+        return true;
+    }
+
+    private static void ExitHistoryNavigation(
+        StringBuilder buffer,
+        ref IReadOnlyList<string> historySnapshot,
+        ref int? historyIndex,
+        ref string draftBeforeHistoryNavigation)
+    {
+        if (historyIndex is null)
+        {
+            return;
+        }
+
+        historyIndex = null;
+        historySnapshot = [];
+        draftBeforeHistoryNavigation = buffer.ToString();
+    }
+
+    private static void ReplaceBuffer(StringBuilder buffer, string value)
+    {
+        buffer.Clear();
+        buffer.Append(value);
     }
 
     private void RenderLine(string prompt, StringBuilder buffer)

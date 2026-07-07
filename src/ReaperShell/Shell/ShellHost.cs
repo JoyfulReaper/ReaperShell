@@ -534,7 +534,11 @@ public sealed class ShellHost
             {
                 await _interactivePromptReady.WaitAsync(cancellationToken);
                 var prompt = FormatPrompt(context);
-                var input = await lineReader.ReadLineAsync(prompt, () => context.WorkingDirectory, cancellationToken);
+                var input = await lineReader.ReadLineAsync(
+                    prompt,
+                    () => context.WorkingDirectory,
+                    () => _sessionState.GetHistory(),
+                    cancellationToken);
                 await writer.WriteAsync(new InteractiveWorkItem(input, null), cancellationToken);
                 if (input is null)
                 {
