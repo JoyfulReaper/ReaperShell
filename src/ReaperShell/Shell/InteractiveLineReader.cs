@@ -1,13 +1,18 @@
 using System.Text;
+using ReaperShell.Abstractions;
 
 namespace ReaperShell.Shell;
 
 internal sealed class InteractiveLineReader
 {
+    private readonly CommandCompletionService _commandCompletionService;
     private readonly PathCompletionService _pathCompletionService;
 
-    public InteractiveLineReader(PathCompletionService? pathCompletionService = null)
+    public InteractiveLineReader(
+        CommandCompletionService? commandCompletionService = null,
+        PathCompletionService? pathCompletionService = null)
     {
+        _commandCompletionService = commandCompletionService ?? new CommandCompletionService();
         _pathCompletionService = pathCompletionService ?? new PathCompletionService();
     }
 
@@ -15,6 +20,8 @@ internal sealed class InteractiveLineReader
         string prompt,
         Func<DirectoryInfo> getWorkingDirectory,
         Func<IReadOnlyList<string>> getHistory,
+        Func<IReadOnlyList<CommandDescriptor>> getCommands,
+        Func<IReadOnlyList<string>> getAliases,
         CancellationToken cancellationToken = default)
     {
         if (Console.IsInputRedirected)
@@ -24,7 +31,14 @@ internal sealed class InteractiveLineReader
 
         try
         {
-            return Task.FromResult(ReadInteractiveLine(prompt, getWorkingDirectory, getHistory, cancellationToken));
+            return Task.FromResult(
+                ReadInteractiveLine(
+                    prompt,
+                    getWorkingDirectory,
+                    getHistory,
+                    getCommands,
+                    getAliases,
+                    cancellationToken));
         }
         catch (InvalidOperationException)
         {
@@ -40,6 +54,8 @@ internal sealed class InteractiveLineReader
         string prompt,
         Func<DirectoryInfo> getWorkingDirectory,
         Func<IReadOnlyList<string>> getHistory,
+        Func<IReadOnlyList<CommandDescriptor>> getCommands,
+        Func<IReadOnlyList<string>> getAliases,
         CancellationToken cancellationToken)
     {
         var originalTreatControlCAsInput = Console.TreatControlCAsInput;
@@ -96,24 +112,15 @@ internal sealed class InteractiveLineReader
                 if (key.Key == ConsoleKey.Tab)
                 {
                     ExitHistoryNavigation(buffer, ref historySnapshot, ref historyIndex, ref draftBeforeHistoryNavigation);
-                    if (_pathCompletionService.TryComplete(buffer.ToString(), getWorkingDirectory, out var completion))
+                    if (TryComplete(
+                        buffer.ToString(),
+                        getWorkingDirectory,
+                        getCommands,
+                        getAliases,
+                        out var completion) &&
+                        completion is not null)
                     {
-                        if (completion is not null && completion.UpdatedLine is not null)
-                        {
-                            buffer.Clear();
-                            buffer.Append(completion.UpdatedLine);
-                            RenderLine(prompt, buffer);
-                        }
-                        else if (completion is not null && completion.ShowCandidates)
-                        {
-                            Console.WriteLine();
-                            foreach (var candidate in completion.Candidates)
-                            {
-                                Console.WriteLine(candidate);
-                            }
-
-                            RenderLine(prompt, buffer);
-                        }
+                        ApplyCompletion(prompt, buffer, completion);
                     }
 
                     continue;
@@ -157,6 +164,56 @@ internal sealed class InteractiveLineReader
         {
             Console.TreatControlCAsInput = originalTreatControlCAsInput;
         }
+    }
+
+    private bool TryComplete(
+        string input,
+        Func<DirectoryInfo> getWorkingDirectory,
+        Func<IReadOnlyList<CommandDescriptor>> getCommands,
+        Func<IReadOnlyList<string>> getAliases,
+        out ILineCompletionResult? result)
+    {
+        if (_commandCompletionService.TryComplete(input, getCommands, getAliases, out var commandCompletion))
+        {
+            result = commandCompletion;
+            return true;
+        }
+
+        if (_pathCompletionService.TryComplete(input, getWorkingDirectory, out var pathCompletion))
+        {
+            result = pathCompletion;
+            return true;
+        }
+
+        result = null;
+        return false;
+    }
+
+    private void ApplyCompletion(
+        string prompt,
+        StringBuilder buffer,
+        ILineCompletionResult completion)
+    {
+        if (completion.UpdatedLine is not null)
+        {
+            buffer.Clear();
+            buffer.Append(completion.UpdatedLine);
+            RenderLine(prompt, buffer);
+            return;
+        }
+
+        if (!completion.ShowCandidates)
+        {
+            return;
+        }
+
+        Console.WriteLine();
+        foreach (var candidate in completion.Candidates)
+        {
+            Console.WriteLine(candidate);
+        }
+
+        RenderLine(prompt, buffer);
     }
 
     private static bool TryMoveHistoryBackward(

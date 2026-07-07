@@ -306,4 +306,4 @@ internal sealed class PathCompletionService
 internal sealed record PathCompletionResult(
     string? UpdatedLine,
     bool ShowCandidates,
-    IReadOnlyList<string> Candidates);
+    IReadOnlyList<string> Candidates) : ILineCompletionResult;

@@ -538,6 +538,8 @@ public sealed class ShellHost
                     prompt,
                     () => context.WorkingDirectory,
                     () => _sessionState.GetHistory(),
+                    () => _commandRegistry.GetAllCommands(),
+                    () => _settings.Aliases.Keys.ToArray(),
                     cancellationToken);
                 await writer.WriteAsync(new InteractiveWorkItem(input, null), cancellationToken);
                 if (input is null)
