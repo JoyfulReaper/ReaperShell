@@ -10,6 +10,8 @@ namespace ReaperShell.Tests;
 [Collection("Process state")]
 public sealed class ProgramStartupTests : IAsyncLifetime
 {
+    private const string BannerText = "REAPER SHELL v0.1";
+
     private readonly string _root = Path.Combine(Path.GetTempPath(), "ReaperShell.ProgramStartupTests", Guid.NewGuid().ToString("N"));
     private readonly string _workspaceRoot = WorkspaceRootResolver.FindWorkspaceRoot();
     private readonly string _stateDirectory;
@@ -83,6 +85,112 @@ public sealed class ProgramStartupTests : IAsyncLifetime
         Assert.Equal(0, result.ExitCode);
         Assert.DoesNotContain("Auto-loading trusted repo 'autoload-skipped'...", result.StdOut);
         Assert.Contains("autoload-skipped | local | trusted | autoload=on | unloaded", result.StdOut);
+    }
+
+    [Fact]
+    public async Task QuietCommandSuppressesBanner()
+    {
+        var result = await RunProgramAsync(
+            "--state-dir",
+            _stateDirectory,
+            "--command",
+            "echo hello",
+            "--quiet",
+            "--no-profile",
+            "--no-autoload");
+
+        Assert.Equal(0, result.ExitCode);
+        Assert.Contains("hello", result.StdOut);
+        Assert.DoesNotContain(BannerText, result.StdOut);
+    }
+
+    [Fact]
+    public async Task NormalCommandShowsBanner()
+    {
+        var result = await RunProgramAsync(
+            "--state-dir",
+            _stateDirectory,
+            "--command",
+            "echo hello",
+            "--no-profile",
+            "--no-autoload");
+
+        Assert.Equal(0, result.ExitCode);
+        Assert.Contains("hello", result.StdOut);
+        Assert.Contains(BannerText, result.StdOut);
+    }
+
+    [Fact]
+    public async Task RunModeExecutesCommandWithoutQuoteWrapper()
+    {
+        var result = await RunProgramAsync(
+            "--state-dir",
+            _stateDirectory,
+            "--no-autoload",
+            "run",
+            "echo",
+            "hello");
+
+        Assert.Equal(0, result.ExitCode);
+        Assert.Contains("hello", result.StdOut);
+        Assert.DoesNotContain(BannerText, result.StdOut);
+    }
+
+    [Fact]
+    public async Task RunModePreservesSpacedArgs()
+    {
+        var result = await RunProgramAsync(
+            "--state-dir",
+            _stateDirectory,
+            "--no-autoload",
+            "run",
+            "echo",
+            "hello world");
+
+        Assert.Equal(0, result.ExitCode);
+        Assert.Contains("hello world", result.StdOut);
+        Assert.DoesNotContain(BannerText, result.StdOut);
+    }
+
+    [Fact]
+    public async Task RunModeKeepsCommandPackAutoloadEnabledByDefault()
+    {
+        await CreateBuiltRepoAsync("run-autoload", autoLoad: true);
+
+        var result = await RunProgramAsync(
+            "--state-dir",
+            _stateDirectory,
+            "run",
+            "hello");
+
+        Assert.Equal(0, result.ExitCode);
+        Assert.Contains("Hello from a live-loaded ReaperShell command.", result.StdOut);
+        Assert.DoesNotContain(BannerText, result.StdOut);
+    }
+
+    [Fact]
+    public async Task QuietCommandDoesNotRunCommandHooks()
+    {
+        var ritualsDirectory = Path.Combine(_stateDirectory, "rituals");
+        Directory.CreateDirectory(ritualsDirectory);
+        await File.WriteAllTextAsync(Path.Combine(ritualsDirectory, "before.rsh"), "echo from-hook");
+
+        var settings = await ShellSettings.LoadOrCreateAsync(_stateDirectory, CancellationToken.None);
+        settings.Hooks[ShellHookEventNames.BeforeCommand] = ["before"];
+        await settings.SaveAsync(_stateDirectory, CancellationToken.None);
+
+        var result = await RunProgramAsync(
+            "--state-dir",
+            _stateDirectory,
+            "--command",
+            "echo hello",
+            "--quiet",
+            "--no-profile",
+            "--no-autoload");
+
+        Assert.Equal(0, result.ExitCode);
+        Assert.Contains("hello", result.StdOut);
+        Assert.DoesNotContain("from-hook", result.StdOut);
     }
 
     [Fact]

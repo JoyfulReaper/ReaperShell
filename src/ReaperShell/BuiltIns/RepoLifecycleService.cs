@@ -54,7 +54,8 @@ internal sealed class RepoLifecycleService
 
     internal async Task<int> AutoLoadTrustedReposAsync(
         ShellContext context,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool triggerLoadedHooks = true)
     {
         var correctedInvalidAutoLoad = false;
         foreach (var repo in _settings.Repos.Values.Where(repo => repo.AutoLoad && !repo.Trusted))
@@ -85,7 +86,7 @@ internal sealed class RepoLifecycleService
             }
 
             context.WriteLine($"Auto-loading trusted repo '{repo.Name}'...");
-            var loadExitCode = await LoadRepoAsync(context, repo, cancellationToken);
+            var loadExitCode = await LoadRepoAsync(context, repo, cancellationToken, triggerLoadedHooks);
             if (loadExitCode != 0)
             {
                 context.WriteErrorLine(

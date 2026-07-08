@@ -76,7 +76,19 @@ internal static class Program
         await EnsureDefaultProfileExistsAsync(defaultProfilePath);
         if (!options.NoAutoLoad)
         {
-            await repoCommand.AutoLoadTrustedReposAsync(context, CancellationToken.None);
+            var autoLoadContext = options.Quiet
+                ? new ShellContext(
+                    TextWriter.Null,
+                    context.Error,
+                    context.WorkingDirectory,
+                    context.Services,
+                    context.CancellationToken,
+                    context.ColorMode)
+                : context;
+            await repoCommand.AutoLoadTrustedReposAsync(
+                autoLoadContext,
+                CancellationToken.None,
+                triggerLoadedHooks: !options.Quiet);
         }
         var shouldRunProfile =
             !options.NoProfile &&
@@ -98,6 +110,7 @@ internal static class Program
                 context,
                 scriptPath,
                 options.ContinueOnError,
+                options.Quiet ? ShellRunOptions.Quiet with { TriggerCommandHooks = true } : ShellRunOptions.Default,
                 CancellationToken.None);
         }
 
@@ -109,7 +122,11 @@ internal static class Program
                 return 1;
             }
 
-            return await host.RunCommandAsync(context, options.CommandText, CancellationToken.None);
+            return await host.RunCommandAsync(
+                context,
+                options.CommandText,
+                options.Quiet ? ShellRunOptions.Quiet : ShellRunOptions.Default,
+                CancellationToken.None);
         }
 
         return await host.RunInteractiveAsync(
@@ -319,6 +336,20 @@ pray
         {
             switch (args[index])
             {
+                case "run":
+                    var commandArgs = args.Skip(index + 1).ToArray();
+                    if (commandArgs.Length == 0)
+                    {
+                        errorMessage = "Missing command after run.";
+                        return false;
+                    }
+
+                    options.CommandText = JoinCommandArguments(commandArgs);
+                    options.ExternalRunMode = true;
+                    options.NoProfile = true;
+                    options.Quiet = true;
+                    return true;
+
                 case "--script":
                     if (!TryReadOptionValue(args, ref index, "--script", out var scriptPath, out errorMessage))
                     {
@@ -358,6 +389,10 @@ pray
                     options.NoProfile = true;
                     break;
 
+                case "--quiet":
+                    options.Quiet = true;
+                    break;
+
                 case "--profile":
                     if (!TryReadOptionValue(args, ref index, "--profile", out var profilePath, out errorMessage))
                     {
@@ -387,6 +422,21 @@ pray
         return true;
     }
 
+    private static string JoinCommandArguments(IReadOnlyList<string> args)
+    {
+        return string.Join(" ", args.Select(QuoteCommandArgument));
+    }
+
+    private static string QuoteCommandArgument(string arg)
+    {
+        if (arg.Length > 0 && !arg.Any(char.IsWhiteSpace) && !arg.Contains('"'))
+        {
+            return arg;
+        }
+
+        return "\"" + arg.Replace("\"", "\\\"", StringComparison.Ordinal) + "\"";
+    }
+
     private static bool TryReadOptionValue(
         IReadOnlyList<string> args,
         ref int index,
@@ -412,18 +462,23 @@ pray
         return """
 Usage:
   ReaperShell
-  ReaperShell --command "<command>" [--profile <path>] [--no-profile] [--no-autoload]
+  ReaperShell --command "<command>" [--quiet] [--profile <path>] [--no-profile] [--no-autoload]
+  ReaperShell run <command> [args...]
   ReaperShell --script <path> [--continue-on-error] [--state-dir <path>] [--profile <path>] [--no-profile] [--no-autoload]
 
 Options:
   --command <command>         Execute one command and exit.
   --script <path>             Execute commands from a script file and exit.
   --continue-on-error         Continue running a script after a command fails.
+  --quiet                     Suppress startup banner and shell flavor for non-interactive use.
   --no-autoload               Skip trusted repo auto-loading on startup.
   --no-profile                Disable profile execution.
   --profile <path>            Execute the provided profile instead of <state-dir>/profile.rsh.
   --state-dir <path>          Store settings.json and managed repos under this directory.
   --help, -h                  Show usage information.
+
+Notes:
+  run                         Executes a ReaperShell command without entering interactive mode. Intended for PowerShell/CMD/CI usage.
 """;
     }
 }
@@ -437,6 +492,10 @@ internal sealed class ProgramOptions
     public bool NoProfile { get; set; }
 
     public bool NoAutoLoad { get; set; }
+
+    public bool Quiet { get; set; }
+
+    public bool ExternalRunMode { get; set; }
 
     public string? ProfilePath { get; set; }
 

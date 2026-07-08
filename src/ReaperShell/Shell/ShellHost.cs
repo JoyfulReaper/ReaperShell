@@ -121,7 +121,26 @@ public sealed class ShellHost
         bool continueOnError,
         CancellationToken cancellationToken)
     {
-        ShellBanner.Write(context);
+        return await RunScriptAsync(
+            context,
+            scriptPath,
+            continueOnError,
+            ShellRunOptions.Default,
+            cancellationToken);
+    }
+
+    public async Task<int> RunScriptAsync(
+        ShellContext context,
+        string scriptPath,
+        bool continueOnError,
+        ShellRunOptions runOptions,
+        CancellationToken cancellationToken)
+    {
+        if (runOptions.WriteBanner)
+        {
+            ShellBanner.Write(context);
+        }
+
         return await ExecuteScriptFileAsync(
             context,
             scriptPath,
@@ -141,11 +160,32 @@ public sealed class ShellHost
         string commandText,
         CancellationToken cancellationToken)
     {
-        ShellBanner.Write(context);
+        return await RunCommandAsync(
+            context,
+            commandText,
+            ShellRunOptions.Default,
+            cancellationToken);
+    }
+
+    public async Task<int> RunCommandAsync(
+        ShellContext context,
+        string commandText,
+        ShellRunOptions runOptions,
+        CancellationToken cancellationToken)
+    {
+        if (runOptions.WriteBanner)
+        {
+            ShellBanner.Write(context);
+        }
+
         return await ExecuteCommandAsync(
             context,
             commandText,
-            new CommandExecutionOptions(EchoCommand: false, TriggerCommandHooks: true, AllowCurse: true, AllowAmbient: true),
+            new CommandExecutionOptions(
+                EchoCommand: false,
+                TriggerCommandHooks: runOptions.TriggerCommandHooks,
+                AllowCurse: runOptions.AllowCurse,
+                AllowAmbient: runOptions.AllowAmbient),
             null,
             cancellationToken);
     }
@@ -1019,6 +1059,21 @@ public sealed class ShellHost
 }
 
 public sealed record CommandExecutionOptions(bool EchoCommand, bool TriggerCommandHooks, bool RecordHistory = true, bool AllowCurse = false, bool AllowAmbient = false);
+
+public sealed record ShellRunOptions(
+    bool WriteBanner = true,
+    bool TriggerCommandHooks = true,
+    bool AllowCurse = true,
+    bool AllowAmbient = true)
+{
+    public static ShellRunOptions Default { get; } = new();
+
+    public static ShellRunOptions Quiet { get; } = new(
+        WriteBanner: false,
+        TriggerCommandHooks: false,
+        AllowCurse: false,
+        AllowAmbient: false);
+}
 
 internal sealed record QueuedInteractiveCommand(
     ShellContext Context,

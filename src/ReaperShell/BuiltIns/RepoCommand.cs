@@ -94,9 +94,12 @@ public sealed class RepoCommand : IShellCommand
         };
     }
 
-    internal Task<int> AutoLoadTrustedReposAsync(ShellContext context, CancellationToken cancellationToken)
+    internal Task<int> AutoLoadTrustedReposAsync(
+        ShellContext context,
+        CancellationToken cancellationToken,
+        bool triggerLoadedHooks = true)
     {
-        return _lifecycleService.AutoLoadTrustedReposAsync(context, cancellationToken);
+        return _lifecycleService.AutoLoadTrustedReposAsync(context, cancellationToken, triggerLoadedHooks);
     }
 
     private async Task<int> RemoveAsync(
