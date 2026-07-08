@@ -20,7 +20,7 @@ internal static class WorkspaceRootResolver
         }
 
         throw new InvalidOperationException(
-            "Could not locate the ReaperShell workspace root. Expected a directory containing ReaperShell.slnx or src/ReaperShell.Abstractions/ReaperShell.Abstractions.csproj.");
+            "Could not locate the ReaperShell workspace root. Expected a directory containing ReaperShell.slnx, src/ReaperShell.Abstractions/ReaperShell.Abstractions.csproj, or ReaperShell.Abstractions/ReaperShell.Abstractions.csproj.");
     }
 
     private static bool TryFindWorkspaceRoot(string startingPoint, out string workspaceRoot)
@@ -57,6 +57,10 @@ internal static class WorkspaceRootResolver
                File.Exists(Path.Combine(
                    candidateDirectory,
                    "src",
+                   "ReaperShell.Abstractions",
+                   "ReaperShell.Abstractions.csproj")) ||
+               File.Exists(Path.Combine(
+                   candidateDirectory,
                    "ReaperShell.Abstractions",
                    "ReaperShell.Abstractions.csproj"));
     }
