@@ -85,6 +85,28 @@ public sealed class ProgramStartupTests : IAsyncLifetime
         Assert.Contains("autoload-skipped | local | trusted | autoload=on | unloaded", result.StdOut);
     }
 
+    [Fact]
+    public void FatalStartupPauseDecisionIsConservative()
+    {
+        var interactiveOptions = new ProgramOptions();
+        var helpOptions = new ProgramOptions { ShowHelp = true };
+        var scriptOptions = new ProgramOptions { ScriptPath = "script.rsh" };
+        var commandOptions = new ProgramOptions { CommandText = "echo hello" };
+        var redirectedConsole = new ConsoleRedirectionState(true, false, false);
+
+        Assert.True(Program.ShouldPauseAfterFatalStartupError(
+            interactiveOptions,
+            new ConsoleRedirectionState(false, false, false),
+            CancellationToken.None));
+        Assert.False(Program.ShouldPauseAfterFatalStartupError(helpOptions, new ConsoleRedirectionState(false, false, false), CancellationToken.None));
+        Assert.False(Program.ShouldPauseAfterFatalStartupError(scriptOptions, new ConsoleRedirectionState(false, false, false), CancellationToken.None));
+        Assert.False(Program.ShouldPauseAfterFatalStartupError(commandOptions, new ConsoleRedirectionState(false, false, false), CancellationToken.None));
+        Assert.False(Program.ShouldPauseAfterFatalStartupError(interactiveOptions, redirectedConsole, CancellationToken.None));
+        Assert.False(Program.ShouldPauseAfterFatalStartupError(interactiveOptions, new ConsoleRedirectionState(false, true, false), CancellationToken.None));
+        Assert.False(Program.ShouldPauseAfterFatalStartupError(interactiveOptions, new ConsoleRedirectionState(false, false, true), CancellationToken.None));
+        Assert.False(Program.ShouldPauseAfterFatalStartupError(interactiveOptions, new ConsoleRedirectionState(false, false, false), new CancellationToken(canceled: true)));
+    }
+
     private async Task CreateBuiltRepoAsync(string repoName, bool autoLoad)
     {
         var repoRoot = Path.Combine(_root, repoName);

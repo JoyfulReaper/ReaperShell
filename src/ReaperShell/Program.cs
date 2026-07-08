@@ -29,8 +29,7 @@ internal static class Program
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine(ex.Message);
-            return 1;
+            return FatalStartupError(ex.Message, options);
         }
 
         var workingDirectory = Environment.CurrentDirectory;
@@ -260,6 +259,54 @@ pray
         return exitCode == 0 || !explicitProfile;
     }
 
+    private static int FatalStartupError(string message, ProgramOptions options)
+    {
+        Console.Error.WriteLine(message);
+
+        if (ShouldPauseAfterFatalStartupError(options))
+        {
+            Console.Error.WriteLine();
+            Console.Error.Write("Press Enter to exit...");
+            Console.ReadLine();
+        }
+
+        return 1;
+    }
+
+    internal static bool ShouldPauseAfterFatalStartupError(ProgramOptions options)
+    {
+        return ShouldPauseAfterFatalStartupError(
+            options,
+            new ConsoleRedirectionState(
+                Console.IsInputRedirected,
+                Console.IsOutputRedirected,
+                Console.IsErrorRedirected),
+            CancellationToken.None);
+    }
+
+    internal static bool ShouldPauseAfterFatalStartupError(
+        ProgramOptions options,
+        ConsoleRedirectionState consoleState,
+        CancellationToken cancellationToken)
+    {
+        if (options.ShowHelp ||
+            options.ScriptPath is not null ||
+            options.CommandText is not null ||
+            cancellationToken.IsCancellationRequested)
+        {
+            return false;
+        }
+
+        if (consoleState.InputRedirected ||
+            consoleState.OutputRedirected ||
+            consoleState.ErrorRedirected)
+        {
+            return false;
+        }
+
+        return true;
+    }
+
     private static bool TryParseOptions(
         IReadOnlyList<string> args,
         out ProgramOptions options,
@@ -399,3 +446,8 @@ internal sealed class ProgramOptions
 
     public string? StateDirectory { get; set; }
 }
+
+internal readonly record struct ConsoleRedirectionState(
+    bool InputRedirected,
+    bool OutputRedirected,
+    bool ErrorRedirected);
