@@ -13,12 +13,12 @@ public sealed class GrepCommand : IShellCommand
         IReadOnlyList<string> args,
         CancellationToken cancellationToken = default)
     {
-        if (!TryParseArgs(context, args, out var ignoreCase, out var pattern, out var filePath))
+        if (!TryParseArgs(context, args, out var ignoreCase, out var pattern, out var filePath, out var readFromInput))
         {
             return 2;
         }
 
-        if (!File.Exists(filePath))
+        if (!readFromInput && !File.Exists(filePath))
         {
             context.WriteErrorLine($"File does not exist: {filePath}");
             return 2;
@@ -28,7 +28,11 @@ public sealed class GrepCommand : IShellCommand
         {
             var comparison = ignoreCase ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
             var matched = false;
-            await foreach (var line in File.ReadLinesAsync(filePath, cancellationToken))
+            var lines = readFromInput
+                ? context.Input.ReadLinesAsync(cancellationToken)
+                : File.ReadLinesAsync(filePath, cancellationToken);
+
+            await foreach (var line in lines)
             {
                 if (line.Contains(pattern, comparison))
                 {
@@ -51,11 +55,31 @@ public sealed class GrepCommand : IShellCommand
         IReadOnlyList<string> args,
         out bool ignoreCase,
         out string pattern,
-        out string filePath)
+        out string filePath,
+        out bool readFromInput)
     {
         ignoreCase = false;
         pattern = string.Empty;
         filePath = string.Empty;
+        readFromInput = false;
+
+        if (args.Count == 3 && (string.Equals(args[0], "-i", StringComparison.OrdinalIgnoreCase) ||
+                                string.Equals(args[0], "--ignore-case", StringComparison.OrdinalIgnoreCase)))
+        {
+            ignoreCase = true;
+            pattern = args[1];
+            filePath = Path.GetFullPath(args[2], context.WorkingDirectory.FullName);
+            return true;
+        }
+
+        if (args.Count == 2 && (string.Equals(args[0], "-i", StringComparison.OrdinalIgnoreCase) ||
+                                string.Equals(args[0], "--ignore-case", StringComparison.OrdinalIgnoreCase)))
+        {
+            ignoreCase = true;
+            pattern = args[1];
+            readFromInput = true;
+            return true;
+        }
 
         if (args.Count == 2)
         {
@@ -64,12 +88,10 @@ public sealed class GrepCommand : IShellCommand
             return true;
         }
 
-        if (args.Count == 3 && (string.Equals(args[0], "-i", StringComparison.OrdinalIgnoreCase) ||
-                                string.Equals(args[0], "--ignore-case", StringComparison.OrdinalIgnoreCase)))
+        if (args.Count == 1)
         {
-            ignoreCase = true;
-            pattern = args[1];
-            filePath = Path.GetFullPath(args[2], context.WorkingDirectory.FullName);
+            pattern = args[0];
+            readFromInput = true;
             return true;
         }
 

@@ -13,28 +13,46 @@ public sealed class CatCommand : IShellCommand
         IReadOnlyList<string> args,
         CancellationToken cancellationToken = default)
     {
-        if (args.Count != 1)
+        if (args.Count > 1)
         {
             context.WriteErrorLine("Usage: cat <file>");
             return 1;
         }
 
-        var filePath = Path.GetFullPath(args[0], context.WorkingDirectory.FullName);
-        if (!File.Exists(filePath))
+        if (args.Count == 1)
         {
-            context.WriteErrorLine($"File does not exist: {filePath}");
-            return 1;
+            var filePath = Path.GetFullPath(args[0], context.WorkingDirectory.FullName);
+            if (!File.Exists(filePath))
+            {
+                context.WriteErrorLine($"File does not exist: {filePath}");
+                return 1;
+            }
+
+            try
+            {
+                var contents = await File.ReadAllTextAsync(filePath, cancellationToken);
+                context.WriteLine(contents);
+                return 0;
+            }
+            catch (Exception ex)
+            {
+                context.WriteErrorLine($"Failed to read file: {ex.Message}");
+                return 1;
+            }
         }
 
         try
         {
-            var contents = await File.ReadAllTextAsync(filePath, cancellationToken);
-            context.WriteLine(contents);
+            await foreach (var line in context.Input.ReadLinesAsync(cancellationToken))
+            {
+                context.WriteLine(line);
+            }
+
             return 0;
         }
         catch (Exception ex)
         {
-            context.WriteErrorLine($"Failed to read file: {ex.Message}");
+            context.WriteErrorLine($"Failed to read stdin: {ex.Message}");
             return 1;
         }
     }

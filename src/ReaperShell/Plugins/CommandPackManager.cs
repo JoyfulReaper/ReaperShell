@@ -81,7 +81,7 @@ public sealed class CommandPackManager
                     context.WriteLine,
                     context.WriteErrorLine,
                     dotnetEnvironment,
-                    cancellationToken);
+                    cancellationToken: cancellationToken);
 
                 if (restoreResult.ExitCode != 0)
                 {
@@ -96,7 +96,7 @@ public sealed class CommandPackManager
                     context.WriteLine,
                     context.WriteErrorLine,
                     dotnetEnvironment,
-                    cancellationToken);
+                    cancellationToken: cancellationToken);
 
                 if (result.ExitCode != 0)
                 {

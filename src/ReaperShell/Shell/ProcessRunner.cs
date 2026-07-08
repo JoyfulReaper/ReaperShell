@@ -48,6 +48,7 @@ public sealed class ProcessRunner
         Action<string>? onStandardOutput = null,
         Action<string>? onStandardError = null,
         IReadOnlyDictionary<string, string?>? environmentVariables = null,
+        string? standardInput = null,
         CancellationToken cancellationToken = default)
     {
         var startInfo = new ProcessStartInfo
@@ -57,6 +58,7 @@ public sealed class ProcessRunner
             UseShellExecute = false,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
+            RedirectStandardInput = standardInput is not null,
             CreateNoWindow = true
         };
 
@@ -108,6 +110,13 @@ public sealed class ProcessRunner
 
         process.BeginOutputReadLine();
         process.BeginErrorReadLine();
+
+        if (standardInput is not null)
+        {
+            await process.StandardInput.WriteAsync(standardInput);
+            await process.StandardInput.FlushAsync();
+            process.StandardInput.Close();
+        }
 
         try
         {

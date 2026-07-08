@@ -18,6 +18,8 @@ public sealed class ShellHost
     private readonly ProcessRunner _processRunner;
     private readonly string _stateDirectory;
     private readonly SemaphoreSlim _interactivePromptReady = new(0, 1);
+    private readonly ShellCommandLineParser _commandLineParser = new();
+    private readonly CommandLineExecutor _commandLineExecutor = new();
     private readonly ShellCurseState _curseState;
     private readonly ShellSessionState _sessionState;
     private readonly ShellSettings _settings;
@@ -285,32 +287,61 @@ public sealed class ShellHost
                 context.WriteLine($"{FormatPrompt(context)}{input}");
             }
 
-            var tokens = _commandParser.Parse(input);
-            if (tokens.Count == 0)
+            if (!_commandLineParser.TryParse(input, out var commandLine, out var parseError))
+            {
+                context.WriteErrorLine(parseError);
+                return 1;
+            }
+
+            if (commandLine is null || commandLine.Pipelines.Count == 0)
             {
                 return 0;
             }
 
-            if (!TryResolveCommandTokens(tokens, options.EchoCommand, context, out var resolvedTokens))
+            if (commandLine.IsSimpleCommand)
             {
+                if (options.RecordHistory && !IsHistoryCommand(commandLine.Pipelines[0].Segments[0].Tokens))
+                {
+                    _sessionState.RecordHistory(input);
+                }
+
+                return await ExecuteResolvedTokensAsync(
+                    context,
+                    commandLine.Pipelines[0].Segments[0].Tokens,
+                    options,
+                    cancellationToken);
+            }
+
+            var firstSegment = commandLine.Pipelines[0].Segments[0];
+            if (firstSegment.Tokens.Count == 0)
+            {
+                context.WriteErrorLine("Pipeline segment cannot be empty.");
                 return 1;
             }
 
-            if (options.RecordHistory && !IsHistoryCommand(resolvedTokens))
+            if (options.RecordHistory && !IsHistoryCommand(firstSegment.Tokens))
             {
                 _sessionState.RecordHistory(input);
             }
 
-            var curseDecision = _curseState.EvaluateBeforeCommand(resolvedTokens[0], options.AllowCurse);
-            if (curseDecision.Message is not null)
+            if (!TryResolveCommandTokens(firstSegment.Tokens, false, context, out var resolvedFirstTokens))
             {
-                if (curseDecision.BlockCommand)
-                {
-                    context.WriteErrorLine(curseDecision.Message);
-                    return 1;
-                }
+                return 1;
+            }
 
-                context.WriteLine(curseDecision.Message);
+            if (options.AllowCurse)
+            {
+                var curseDecision = _curseState.EvaluateBeforeCommand(resolvedFirstTokens[0], options.AllowCurse);
+                if (curseDecision.Message is not null)
+                {
+                    if (curseDecision.BlockCommand)
+                    {
+                        context.WriteErrorLine(curseDecision.Message);
+                        return 1;
+                    }
+
+                    context.WriteLine(curseDecision.Message);
+                }
             }
 
             if (options.TriggerCommandHooks)
@@ -318,38 +349,39 @@ public sealed class ShellHost
                 await RunHookEventAsync(context, ShellHookEventNames.BeforeCommand, cancellationToken);
             }
 
-            var exitCode = 1;
+            var innerOptions = new CommandExecutionOptions(
+                EchoCommand: false,
+                TriggerCommandHooks: false,
+                RecordHistory: false,
+                AllowCurse: false,
+                AllowAmbient: false);
+
+            int exitCode;
             try
             {
-                if (!_commandRegistry.TryGet(resolvedTokens[0], out var command))
-                {
-                    exitCode = await TryRunExternalCommandAsync(
-                        context,
-                        resolvedTokens,
-                        cancellationToken);
-                }
-                else
-                {
-                    exitCode = await command.ExecuteAsync(context, resolvedTokens.Skip(1).ToArray(), cancellationToken);
-                }
-            }
-            catch (OperationCanceledException)
-            {
-                context.WriteErrorLine("Command canceled.");
+                exitCode = await _commandLineExecutor.ExecuteAsync(
+                    context,
+                    commandLine,
+                    ExecuteSegmentAsync,
+                    innerOptions,
+                    cancellationToken);
             }
             catch (Exception ex)
             {
-                context.WriteErrorLine($"Command failed: {ex.Message}");
-            }
-            finally
-            {
-                if (options.TriggerCommandHooks)
-                {
-                    await RunHookEventAsync(context, ShellHookEventNames.AfterCommand, cancellationToken);
-                }
+                context.WriteErrorLine($"Failed to open redirection target: {ex.Message}");
+                return 1;
             }
 
-            MaybeEmitAmbientMessage(context, resolvedTokens[0], exitCode, options);
+            if (options.TriggerCommandHooks)
+            {
+                await RunHookEventAsync(context, ShellHookEventNames.AfterCommand, cancellationToken);
+            }
+
+            if (options.AllowAmbient)
+            {
+                MaybeEmitAmbientMessage(context, resolvedFirstTokens[0], exitCode, options);
+            }
+
             return exitCode;
         }
         finally
@@ -360,6 +392,83 @@ public sealed class ShellHost
                 _commandExecutionLock.Release();
             }
         }
+    }
+
+    private async Task<int> ExecuteSegmentAsync(
+        ShellContext context,
+        IReadOnlyList<string> tokens,
+        CommandExecutionOptions options,
+        CancellationToken cancellationToken)
+    {
+        return await ExecuteResolvedTokensAsync(context, tokens, options, cancellationToken);
+    }
+
+    private async Task<int> ExecuteResolvedTokensAsync(
+        ShellContext context,
+        IReadOnlyList<string> tokens,
+        CommandExecutionOptions options,
+        CancellationToken cancellationToken)
+    {
+        if (tokens.Count == 0)
+        {
+            return 0;
+        }
+
+        if (!TryResolveCommandTokens(tokens, options.EchoCommand, context, out var resolvedTokens))
+        {
+            return 1;
+        }
+
+        var curseDecision = _curseState.EvaluateBeforeCommand(resolvedTokens[0], options.AllowCurse);
+        if (curseDecision.Message is not null)
+        {
+            if (curseDecision.BlockCommand)
+            {
+                context.WriteErrorLine(curseDecision.Message);
+                return 1;
+            }
+
+            context.WriteLine(curseDecision.Message);
+        }
+
+        if (options.TriggerCommandHooks)
+        {
+            await RunHookEventAsync(context, ShellHookEventNames.BeforeCommand, cancellationToken);
+        }
+
+        var exitCode = 1;
+        try
+        {
+            if (!_commandRegistry.TryGet(resolvedTokens[0], out var command))
+            {
+                exitCode = await TryRunExternalCommandAsync(
+                    context,
+                    resolvedTokens,
+                    cancellationToken);
+            }
+            else
+            {
+                exitCode = await command.ExecuteAsync(context, resolvedTokens.Skip(1).ToArray(), cancellationToken);
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            context.WriteErrorLine("Command canceled.");
+        }
+        catch (Exception ex)
+        {
+            context.WriteErrorLine($"Command failed: {ex.Message}");
+        }
+        finally
+        {
+            if (options.TriggerCommandHooks)
+            {
+                await RunHookEventAsync(context, ShellHookEventNames.AfterCommand, cancellationToken);
+            }
+        }
+
+        MaybeEmitAmbientMessage(context, resolvedTokens[0], exitCode, options);
+        return exitCode;
     }
 
     private async Task<int> ExecuteScriptFileAsync(
@@ -471,12 +580,14 @@ public sealed class ShellHost
 
                 try
                 {
+                    var standardInput = await context.Input.ReadToEndAsync();
                     return (await _processRunner.RunAsync(
                         executablePath,
                         resolvedTokens.Skip(1).ToArray(),
                         context.WorkingDirectory.FullName,
                         context.WriteLine,
                         context.WriteErrorLine,
+                        standardInput: standardInput,
                         cancellationToken: cancellationToken)).ExitCode;
                 }
                 catch (OperationCanceledException)

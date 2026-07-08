@@ -23,7 +23,18 @@ public sealed class ShellContext
         DirectoryInfo workingDirectory,
         IServiceProvider? services,
         CancellationToken cancellationToken)
-        : this(@out, error, workingDirectory, services, cancellationToken, ShellColorMode.Auto)
+        : this(@out, error, TextReader.Null, workingDirectory, services, cancellationToken, ShellColorMode.Auto)
+    {
+    }
+
+    public ShellContext(
+        TextWriter @out,
+        TextWriter error,
+        TextReader input,
+        DirectoryInfo workingDirectory,
+        IServiceProvider? services,
+        CancellationToken cancellationToken)
+        : this(@out, error, input, workingDirectory, services, cancellationToken, ShellColorMode.Auto)
     {
     }
 
@@ -33,10 +44,23 @@ public sealed class ShellContext
         DirectoryInfo workingDirectory,
         IServiceProvider? services,
         CancellationToken cancellationToken,
+        ShellColorMode colorMode)
+        : this(@out, error, TextReader.Null, workingDirectory, services, cancellationToken, colorMode)
+    {
+    }
+
+    public ShellContext(
+        TextWriter @out,
+        TextWriter error,
+        TextReader input,
+        DirectoryInfo workingDirectory,
+        IServiceProvider? services,
+        CancellationToken cancellationToken,
         ShellColorMode colorMode = ShellColorMode.Auto)
     {
         Out = @out;
         Error = error;
+        Input = input;
         WorkingDirectory = workingDirectory;
         Services = services;
         CancellationToken = cancellationToken;
@@ -46,6 +70,8 @@ public sealed class ShellContext
     public TextWriter Out { get; }
 
     public TextWriter Error { get; }
+
+    public TextReader Input { get; }
 
     public DirectoryInfo WorkingDirectory { get; set; }
 
