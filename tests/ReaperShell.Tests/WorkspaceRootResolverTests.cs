@@ -31,9 +31,26 @@ public sealed class WorkspaceRootResolverTests
     }
 
     [Fact]
+    public void SourceCheckoutFromAppBinResolvesRepoRoot()
+    {
+        using var temp = new TempDirectory();
+        File.WriteAllText(Path.Combine(temp.Root, "ReaperShell.slnx"), string.Empty);
+        Directory.CreateDirectory(Path.Combine(temp.Root, "src", "ReaperShell", "bin", "Debug", "net10.0"));
+        Directory.CreateDirectory(Path.Combine(temp.Root, "src", "ReaperShell.Abstractions"));
+        File.WriteAllText(
+            Path.Combine(temp.Root, "src", "ReaperShell.Abstractions", "ReaperShell.Abstractions.csproj"),
+            string.Empty);
+
+        var resolved = WorkspaceRootResolver.FindWorkspaceRoot(Path.Combine(temp.Root, "src", "ReaperShell", "bin", "Debug", "net10.0"));
+
+        Assert.Equal(temp.Root, resolved);
+    }
+
+    [Fact]
     public void FindsRootByAdjacentAbstractionsProject()
     {
         using var temp = new TempDirectory();
+        File.WriteAllText(Path.Combine(temp.Root, "ReaperShell.dll"), string.Empty);
         Directory.CreateDirectory(Path.Combine(temp.Root, "ReaperShell.Abstractions"));
         File.WriteAllText(
             Path.Combine(temp.Root, "ReaperShell.Abstractions", "ReaperShell.Abstractions.csproj"),
@@ -45,9 +62,22 @@ public sealed class WorkspaceRootResolverTests
     }
 
     [Fact]
+    public void AdjacentAbstractionsWithoutAppMarkerDoesNotBecomeRoot()
+    {
+        using var temp = new TempDirectory();
+        Directory.CreateDirectory(Path.Combine(temp.Root, "src", "ReaperShell.Abstractions"));
+        File.WriteAllText(
+            Path.Combine(temp.Root, "src", "ReaperShell.Abstractions", "ReaperShell.Abstractions.csproj"),
+            string.Empty);
+
+        Assert.Throws<InvalidOperationException>(() => WorkspaceRootResolver.FindWorkspaceRoot(Path.Combine(temp.Root, "src")));
+    }
+
+    [Fact]
     public void WalksUpwardToFindAdjacentAbstractionsProject()
     {
         using var temp = new TempDirectory();
+        File.WriteAllText(Path.Combine(temp.Root, "ReaperShell.dll"), string.Empty);
         Directory.CreateDirectory(Path.Combine(temp.Root, "ReaperShell.Abstractions"));
         File.WriteAllText(
             Path.Combine(temp.Root, "ReaperShell.Abstractions", "ReaperShell.Abstractions.csproj"),
@@ -70,6 +100,35 @@ public sealed class WorkspaceRootResolverTests
         Assert.Contains("ReaperShell.slnx", exception.Message);
         Assert.Contains("src/ReaperShell.Abstractions/ReaperShell.Abstractions.csproj", exception.Message);
         Assert.Contains("ReaperShell.Abstractions/ReaperShell.Abstractions.csproj", exception.Message);
+    }
+
+    [Fact]
+    public void SourceLayoutProjectPathIsResolvedUnderSrc()
+    {
+        using var temp = new TempDirectory();
+        var abstractionsDir = Path.Combine(temp.Root, "src", "ReaperShell.Abstractions");
+        Directory.CreateDirectory(abstractionsDir);
+        var projectPath = Path.Combine(abstractionsDir, "ReaperShell.Abstractions.csproj");
+        File.WriteAllText(projectPath, string.Empty);
+
+        var resolved = WorkspaceRootResolver.GetReaperShellAbstractionsProjectPath(temp.Root);
+
+        Assert.Equal(projectPath, resolved);
+    }
+
+    [Fact]
+    public void PublishedLayoutProjectPathIsResolvedAdjacentToApp()
+    {
+        using var temp = new TempDirectory();
+        File.WriteAllText(Path.Combine(temp.Root, "ReaperShell.dll"), string.Empty);
+        var abstractionsDir = Path.Combine(temp.Root, "ReaperShell.Abstractions");
+        Directory.CreateDirectory(abstractionsDir);
+        var projectPath = Path.Combine(abstractionsDir, "ReaperShell.Abstractions.csproj");
+        File.WriteAllText(projectPath, string.Empty);
+
+        var resolved = WorkspaceRootResolver.GetReaperShellAbstractionsProjectPath(temp.Root);
+
+        Assert.Equal(projectPath, resolved);
     }
 
     private sealed class TempDirectory : IDisposable

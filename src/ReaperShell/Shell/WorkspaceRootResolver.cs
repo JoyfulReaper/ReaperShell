@@ -23,6 +23,34 @@ internal static class WorkspaceRootResolver
             "Could not locate the ReaperShell workspace root. Expected a directory containing ReaperShell.slnx, src/ReaperShell.Abstractions/ReaperShell.Abstractions.csproj, or ReaperShell.Abstractions/ReaperShell.Abstractions.csproj.");
     }
 
+    internal static string GetReaperShellAbstractionsProjectPath(string workspaceRoot)
+    {
+        var sourceLayoutPath = Path.GetFullPath(
+            Path.Combine(
+                workspaceRoot,
+                "src",
+                "ReaperShell.Abstractions",
+                "ReaperShell.Abstractions.csproj"));
+
+        if (File.Exists(sourceLayoutPath))
+        {
+            return sourceLayoutPath;
+        }
+
+        var adjacentLayoutPath = Path.GetFullPath(
+            Path.Combine(
+                workspaceRoot,
+                "ReaperShell.Abstractions",
+                "ReaperShell.Abstractions.csproj"));
+
+        if (File.Exists(adjacentLayoutPath))
+        {
+            return adjacentLayoutPath;
+        }
+
+        return sourceLayoutPath;
+    }
+
     private static bool TryFindWorkspaceRoot(string startingPoint, out string workspaceRoot)
     {
         workspaceRoot = string.Empty;
@@ -53,15 +81,33 @@ internal static class WorkspaceRootResolver
 
     private static bool IsWorkspaceRoot(string candidateDirectory)
     {
+        return IsSourceWorkspaceRoot(candidateDirectory) ||
+               IsAdjacentPublishedWorkspaceRoot(candidateDirectory);
+    }
+
+    private static bool IsSourceWorkspaceRoot(string candidateDirectory)
+    {
         return File.Exists(Path.Combine(candidateDirectory, SolutionFileName)) ||
                File.Exists(Path.Combine(
                    candidateDirectory,
                    "src",
                    "ReaperShell.Abstractions",
-                   "ReaperShell.Abstractions.csproj")) ||
+                   "ReaperShell.Abstractions.csproj"));
+    }
+
+    private static bool IsAdjacentPublishedWorkspaceRoot(string candidateDirectory)
+    {
+        return HasReaperShellAppMarker(candidateDirectory) &&
                File.Exists(Path.Combine(
                    candidateDirectory,
                    "ReaperShell.Abstractions",
                    "ReaperShell.Abstractions.csproj"));
+    }
+
+    private static bool HasReaperShellAppMarker(string candidateDirectory)
+    {
+        return File.Exists(Path.Combine(candidateDirectory, "ReaperShell.exe")) ||
+               File.Exists(Path.Combine(candidateDirectory, "ReaperShell.dll")) ||
+               File.Exists(Path.Combine(candidateDirectory, "ReaperShell"));
     }
 }

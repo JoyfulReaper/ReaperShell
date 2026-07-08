@@ -126,12 +126,7 @@ public sealed class CommandPackManager
 
     private string GetReaperShellAbstractionsProjectPath()
     {
-        return Path.GetFullPath(
-            Path.Combine(
-                _workspaceRoot,
-                "src",
-                "ReaperShell.Abstractions",
-                "ReaperShell.Abstractions.csproj"));
+        return WorkspaceRootResolver.GetReaperShellAbstractionsProjectPath(_workspaceRoot);
     }
 
     private static async Task<string> EnsureNuGetConfigAsync(CancellationToken cancellationToken)
