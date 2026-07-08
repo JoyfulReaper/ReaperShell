@@ -70,7 +70,9 @@ public sealed class WorkspaceRootResolverTests
             Path.Combine(temp.Root, "src", "ReaperShell.Abstractions", "ReaperShell.Abstractions.csproj"),
             string.Empty);
 
-        Assert.Throws<InvalidOperationException>(() => WorkspaceRootResolver.FindWorkspaceRoot(Path.Combine(temp.Root, "src")));
+        var resolved = WorkspaceRootResolver.FindWorkspaceRoot(Path.Combine(temp.Root, "src"));
+
+        Assert.Equal(temp.Root, resolved);
     }
 
     [Fact]

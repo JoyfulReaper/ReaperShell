@@ -39,7 +39,24 @@ internal sealed class CommandCompletionService
         ["command"] = ["templates", "list", "new", "remove", "delete", "rm"],
         ["alias"] = ["set", "remove", "clear", "show"],
         ["hook"] = ["list", "add", "remove", "clear", "events"],
-        ["ritual"] = ["list", "run", "path", "new"]
+        ["ritual"] = ["list", "run", "path", "new"],
+        ["curse"] =
+        [
+            "status",
+            "inspect",
+            "journal",
+            "poke",
+            "enable",
+            "disable",
+            "exorcise",
+            "quiet",
+            "listen",
+            "chatter",
+            "set-failure-rate"
+        ],
+        ["pray"] = ["status", "hard"],
+        ["fortune"] = ["read", "status"],
+        ["env"] = ["get", "set", "unset"]
     };
 
     private readonly CommandParser _commandParser = new();
