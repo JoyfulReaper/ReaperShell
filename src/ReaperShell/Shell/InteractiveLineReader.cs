@@ -5,13 +5,23 @@ namespace ReaperShell.Shell;
 
 internal sealed class InteractiveLineReader
 {
+    private readonly IInteractiveConsole _console;
     private readonly CommandCompletionService _commandCompletionService;
     private readonly PathCompletionService _pathCompletionService;
 
     public InteractiveLineReader(
         CommandCompletionService? commandCompletionService = null,
         PathCompletionService? pathCompletionService = null)
+        : this(new SystemInteractiveConsole(), commandCompletionService, pathCompletionService)
     {
+    }
+
+    internal InteractiveLineReader(
+        IInteractiveConsole console,
+        CommandCompletionService? commandCompletionService = null,
+        PathCompletionService? pathCompletionService = null)
+    {
+        _console = console;
         _commandCompletionService = commandCompletionService ?? new CommandCompletionService();
         _pathCompletionService = pathCompletionService ?? new PathCompletionService();
     }
@@ -24,9 +34,9 @@ internal sealed class InteractiveLineReader
         Func<IReadOnlyList<string>> getAliases,
         CancellationToken cancellationToken = default)
     {
-        if (Console.IsInputRedirected)
+        if (_console.IsInputRedirected)
         {
-            return Task.FromResult(Console.ReadLine());
+            return Task.FromResult(_console.ReadLine());
         }
 
         try
@@ -42,11 +52,11 @@ internal sealed class InteractiveLineReader
         }
         catch (InvalidOperationException)
         {
-            return Task.FromResult(Console.ReadLine());
+            return Task.FromResult(_console.ReadLine());
         }
         catch (IOException)
         {
-            return Task.FromResult(Console.ReadLine());
+            return Task.FromResult(_console.ReadLine());
         }
     }
 
@@ -58,8 +68,8 @@ internal sealed class InteractiveLineReader
         Func<IReadOnlyList<string>> getAliases,
         CancellationToken cancellationToken)
     {
-        var originalTreatControlCAsInput = Console.TreatControlCAsInput;
-        Console.TreatControlCAsInput = true;
+        var originalTreatControlCAsInput = _console.TreatControlCAsInput;
+        _console.TreatControlCAsInput = true;
 
         try
         {
@@ -72,153 +82,274 @@ internal sealed class InteractiveLineReader
 
             while (!cancellationToken.IsCancellationRequested)
             {
-                var key = Console.ReadKey(intercept: true);
+                var key = _console.ReadKey(intercept: true);
 
-                if (key.Modifiers.HasFlag(ConsoleModifiers.Control) && key.Key is ConsoleKey.C or ConsoleKey.D)
+                var initialAction = ProcessKey(
+                    key,
+                    prompt,
+                    buffer,
+                    getWorkingDirectory,
+                    getHistory,
+                    getCommands,
+                    getAliases,
+                    ref historySnapshot,
+                    ref historyIndex,
+                    ref draftBeforeHistoryNavigation);
+
+                switch (initialAction)
                 {
-                    if (key.Key == ConsoleKey.C)
-                    {
-                        buffer.Clear();
-                        ExitHistoryNavigation(buffer, ref historySnapshot, ref historyIndex, ref draftBeforeHistoryNavigation);
-                        RenderLine(prompt, buffer);
-                        continue;
-                    }
-
-                    ExitHistoryNavigation(buffer, ref historySnapshot, ref historyIndex, ref draftBeforeHistoryNavigation);
-                    if (buffer.Length == 0)
-                    {
-                        Console.WriteLine();
+                    case LineKeyAction.Submit:
+                        return buffer.Text;
+                    case LineKeyAction.Exit:
                         return null;
-                    }
-                }
-
-                if (key.Key == ConsoleKey.Enter)
-                {
-                    Console.WriteLine();
-                    return buffer.Text;
-                }
-
-                if (key.Key == ConsoleKey.Backspace)
-                {
-                    ExitHistoryNavigation(buffer, ref historySnapshot, ref historyIndex, ref draftBeforeHistoryNavigation);
-                    if (buffer.Backspace())
-                    {
-                        RenderLine(prompt, buffer);
-                    }
-
-                    continue;
-                }
-
-                if (key.Key == ConsoleKey.Delete)
-                {
-                    ExitHistoryNavigation(buffer, ref historySnapshot, ref historyIndex, ref draftBeforeHistoryNavigation);
-                    if (buffer.Delete())
-                    {
-                        RenderLine(prompt, buffer);
-                    }
-
-                    continue;
-                }
-
-                if (key.Key == ConsoleKey.Tab)
-                {
-                    ExitHistoryNavigation(buffer, ref historySnapshot, ref historyIndex, ref draftBeforeHistoryNavigation);
-                    if (TryComplete(
-                        buffer.Text,
-                        getWorkingDirectory,
-                        getCommands,
-                        getAliases,
-                        out var completion) &&
-                        completion is not null)
-                    {
-                        ApplyCompletion(prompt, buffer, completion);
-                    }
-
-                    continue;
-                }
-
-                if (key.Key == ConsoleKey.UpArrow)
-                {
-                    if (TryMoveHistoryBackward(buffer, getHistory, ref historySnapshot, ref historyIndex, ref draftBeforeHistoryNavigation))
-                    {
-                        RenderLine(prompt, buffer);
-                    }
-
-                    continue;
-                }
-
-                if (key.Key == ConsoleKey.DownArrow)
-                {
-                    if (TryMoveHistoryForward(buffer, ref historySnapshot, ref historyIndex, ref draftBeforeHistoryNavigation))
-                    {
-                        RenderLine(prompt, buffer);
-                    }
-
-                    continue;
-                }
-
-                if (key.Key == ConsoleKey.LeftArrow)
-                {
-                    ExitHistoryNavigation(buffer, ref historySnapshot, ref historyIndex, ref draftBeforeHistoryNavigation);
-                    if (buffer.MoveLeft())
-                    {
-                        RenderLine(prompt, buffer);
-                    }
-
-                    continue;
-                }
-
-                if (key.Key == ConsoleKey.RightArrow)
-                {
-                    ExitHistoryNavigation(buffer, ref historySnapshot, ref historyIndex, ref draftBeforeHistoryNavigation);
-                    if (buffer.MoveRight())
-                    {
-                        RenderLine(prompt, buffer);
-                    }
-
-                    continue;
-                }
-
-                if (key.Key == ConsoleKey.Home)
-                {
-                    ExitHistoryNavigation(buffer, ref historySnapshot, ref historyIndex, ref draftBeforeHistoryNavigation);
-                    if (buffer.MoveHome())
-                    {
-                        RenderLine(prompt, buffer);
-                    }
-
-                    continue;
-                }
-
-                if (key.Key == ConsoleKey.End)
-                {
-                    ExitHistoryNavigation(buffer, ref historySnapshot, ref historyIndex, ref draftBeforeHistoryNavigation);
-                    if (buffer.MoveEnd())
-                    {
-                        RenderLine(prompt, buffer);
-                    }
-
-                    continue;
+                    case LineKeyAction.Render:
+                    case LineKeyAction.None:
+                        break;
                 }
 
                 var character = key.KeyChar;
-                if (character == '\0' || char.IsControl(character))
+                if (!IsPlainPrintable(character))
                 {
                     continue;
                 }
 
                 ExitHistoryNavigation(buffer, ref historySnapshot, ref historyIndex, ref draftBeforeHistoryNavigation);
                 buffer.Insert(character);
+
+                if (TryConsumePasteBurst(
+                    prompt,
+                    buffer,
+                    getWorkingDirectory,
+                    getHistory,
+                    getCommands,
+                    getAliases,
+                    ref historySnapshot,
+                    ref historyIndex,
+                    ref draftBeforeHistoryNavigation,
+                    out var batchAction))
+                {
+                    if (batchAction == LineKeyAction.Exit)
+                    {
+                        return null;
+                    }
+
+                    if (batchAction == LineKeyAction.Submit)
+                    {
+                        return buffer.Text;
+                    }
+
+                    if (batchAction == LineKeyAction.None)
+                    {
+                        RenderLine(prompt, buffer);
+                    }
+
+                    continue;
+                }
+
                 RenderLine(prompt, buffer);
             }
 
-            Console.WriteLine();
+            _console.WriteLine();
             return null;
         }
         finally
         {
-            Console.TreatControlCAsInput = originalTreatControlCAsInput;
+            _console.TreatControlCAsInput = originalTreatControlCAsInput;
         }
+    }
+
+    private bool TryConsumePasteBurst(
+        string prompt,
+        LineEditBuffer buffer,
+        Func<DirectoryInfo> getWorkingDirectory,
+        Func<IReadOnlyList<string>> getHistory,
+        Func<IReadOnlyList<CommandDescriptor>> getCommands,
+        Func<IReadOnlyList<string>> getAliases,
+        ref IReadOnlyList<string> historySnapshot,
+        ref int? historyIndex,
+        ref string draftBeforeHistoryNavigation,
+        out LineKeyAction batchAction)
+    {
+        batchAction = LineKeyAction.None;
+
+        while (_console.KeyAvailable)
+        {
+            var nextKey = _console.ReadKey(intercept: true);
+            if (IsPlainPrintable(nextKey.KeyChar))
+            {
+                ExitHistoryNavigation(buffer, ref historySnapshot, ref historyIndex, ref draftBeforeHistoryNavigation);
+                buffer.Insert(nextKey.KeyChar);
+                continue;
+            }
+
+            batchAction = ProcessKey(
+                nextKey,
+                prompt,
+                buffer,
+                getWorkingDirectory,
+                getHistory,
+                getCommands,
+                getAliases,
+                ref historySnapshot,
+                ref historyIndex,
+                ref draftBeforeHistoryNavigation);
+            return batchAction != LineKeyAction.None;
+        }
+
+        return false;
+    }
+
+    private LineKeyAction ProcessKey(
+        ConsoleKeyInfo key,
+        string prompt,
+        LineEditBuffer buffer,
+        Func<DirectoryInfo> getWorkingDirectory,
+        Func<IReadOnlyList<string>> getHistory,
+        Func<IReadOnlyList<CommandDescriptor>> getCommands,
+        Func<IReadOnlyList<string>> getAliases,
+        ref IReadOnlyList<string> historySnapshot,
+        ref int? historyIndex,
+        ref string draftBeforeHistoryNavigation)
+    {
+        if (key.Modifiers.HasFlag(ConsoleModifiers.Control) && key.Key is ConsoleKey.C or ConsoleKey.D)
+        {
+            if (key.Key == ConsoleKey.C)
+            {
+                buffer.Clear();
+                ExitHistoryNavigation(buffer, ref historySnapshot, ref historyIndex, ref draftBeforeHistoryNavigation);
+                RenderLine(prompt, buffer);
+                return LineKeyAction.Render;
+            }
+
+            ExitHistoryNavigation(buffer, ref historySnapshot, ref historyIndex, ref draftBeforeHistoryNavigation);
+            if (buffer.Length == 0)
+            {
+                _console.WriteLine();
+                return LineKeyAction.Exit;
+            }
+
+            return LineKeyAction.None;
+        }
+
+        if (IsEnterKey(key))
+        {
+            _console.WriteLine();
+            return LineKeyAction.Submit;
+        }
+
+        if (key.Key == ConsoleKey.Backspace)
+        {
+            ExitHistoryNavigation(buffer, ref historySnapshot, ref historyIndex, ref draftBeforeHistoryNavigation);
+            if (buffer.Backspace())
+            {
+                RenderLine(prompt, buffer);
+                return LineKeyAction.Render;
+            }
+
+            return LineKeyAction.None;
+        }
+
+        if (key.Key == ConsoleKey.Delete)
+        {
+            ExitHistoryNavigation(buffer, ref historySnapshot, ref historyIndex, ref draftBeforeHistoryNavigation);
+            if (buffer.Delete())
+            {
+                RenderLine(prompt, buffer);
+                return LineKeyAction.Render;
+            }
+
+            return LineKeyAction.None;
+        }
+
+        if (key.Key == ConsoleKey.Tab)
+        {
+            ExitHistoryNavigation(buffer, ref historySnapshot, ref historyIndex, ref draftBeforeHistoryNavigation);
+            if (TryComplete(
+                buffer.Text,
+                getWorkingDirectory,
+                getCommands,
+                getAliases,
+                out var completion) &&
+                completion is not null)
+            {
+                ApplyCompletion(prompt, buffer, completion);
+                return LineKeyAction.Render;
+            }
+
+            return LineKeyAction.None;
+        }
+
+        if (key.Key == ConsoleKey.UpArrow)
+        {
+            if (TryMoveHistoryBackward(buffer, getHistory, ref historySnapshot, ref historyIndex, ref draftBeforeHistoryNavigation))
+            {
+                RenderLine(prompt, buffer);
+                return LineKeyAction.Render;
+            }
+
+            return LineKeyAction.None;
+        }
+
+        if (key.Key == ConsoleKey.DownArrow)
+        {
+            if (TryMoveHistoryForward(buffer, ref historySnapshot, ref historyIndex, ref draftBeforeHistoryNavigation))
+            {
+                RenderLine(prompt, buffer);
+                return LineKeyAction.Render;
+            }
+
+            return LineKeyAction.None;
+        }
+
+        if (key.Key == ConsoleKey.LeftArrow)
+        {
+            ExitHistoryNavigation(buffer, ref historySnapshot, ref historyIndex, ref draftBeforeHistoryNavigation);
+            if (buffer.MoveLeft())
+            {
+                RenderLine(prompt, buffer);
+                return LineKeyAction.Render;
+            }
+
+            return LineKeyAction.None;
+        }
+
+        if (key.Key == ConsoleKey.RightArrow)
+        {
+            ExitHistoryNavigation(buffer, ref historySnapshot, ref historyIndex, ref draftBeforeHistoryNavigation);
+            if (buffer.MoveRight())
+            {
+                RenderLine(prompt, buffer);
+                return LineKeyAction.Render;
+            }
+
+            return LineKeyAction.None;
+        }
+
+        if (key.Key == ConsoleKey.Home)
+        {
+            ExitHistoryNavigation(buffer, ref historySnapshot, ref historyIndex, ref draftBeforeHistoryNavigation);
+            if (buffer.MoveHome())
+            {
+                RenderLine(prompt, buffer);
+                return LineKeyAction.Render;
+            }
+
+            return LineKeyAction.None;
+        }
+
+        if (key.Key == ConsoleKey.End)
+        {
+            ExitHistoryNavigation(buffer, ref historySnapshot, ref historyIndex, ref draftBeforeHistoryNavigation);
+            if (buffer.MoveEnd())
+            {
+                RenderLine(prompt, buffer);
+                return LineKeyAction.Render;
+            }
+
+            return LineKeyAction.None;
+        }
+
+        return LineKeyAction.None;
     }
 
     private bool TryComplete(
@@ -261,10 +392,10 @@ internal sealed class InteractiveLineReader
             return;
         }
 
-        Console.WriteLine();
+        _console.WriteLine();
         foreach (var candidate in completion.Candidates)
         {
-            Console.WriteLine(candidate);
+            _console.WriteLine(candidate);
         }
 
         RenderLine(prompt, buffer);
@@ -351,22 +482,40 @@ internal sealed class InteractiveLineReader
     private void RenderLine(string prompt, LineEditBuffer buffer)
     {
         var currentLine = prompt + buffer.Text;
-        Console.Write("\r");
-        Console.Write(currentLine);
+        _console.Write("\r");
+        _console.Write(currentLine);
         var trailingSpaces = Math.Max(0, _previousRenderLength - currentLine.Length);
         if (trailingSpaces > 0)
         {
-            Console.Write(new string(' ', trailingSpaces));
+            _console.Write(new string(' ', trailingSpaces));
         }
 
-        Console.Write("\r");
-        Console.Write(prompt);
+        _console.Write("\r");
+        _console.Write(prompt);
         if (buffer.CursorIndex > 0)
         {
-            Console.Write(buffer.Text[..buffer.CursorIndex]);
+            _console.Write(buffer.Text[..buffer.CursorIndex]);
         }
 
         _previousRenderLength = currentLine.Length;
+    }
+
+    private static bool IsEnterKey(ConsoleKeyInfo key)
+    {
+        return key.Key == ConsoleKey.Enter || key.KeyChar is '\r' or '\n';
+    }
+
+    private static bool IsPlainPrintable(char character)
+    {
+        return character != '\0' && !char.IsControl(character);
+    }
+
+    private enum LineKeyAction
+    {
+        None,
+        Render,
+        Submit,
+        Exit
     }
 
     private int _previousRenderLength;

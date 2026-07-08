@@ -17,6 +17,7 @@ public sealed class ShellCurseState : ICursedShell
         "pray",
         "curse",
         "fortune",
+        "ritual",
         "help",
         "exit",
         "quit",
@@ -29,7 +30,10 @@ public sealed class ShellCurseState : ICursedShell
         "THE HEAP ACCEPTS YOUR OFFERING.",
         "CSS DEMONS REMAIN CONTAINED.",
         "THE COLLECTIBLE ALC MAY OR MAY NOT HAVE UNLOADED.",
-        "THE BUILD SPIRITS REQUEST ONE MORE CLEAN RELOAD."
+        "THE BUILD SPIRITS REQUEST ONE MORE CLEAN RELOAD.",
+        "THE RITUAL SUBSYSTEM HAS BEEN NOTIFIED. IT DENIES INVOLVEMENT.",
+        "THE ALTAR REQUESTS EXACTLY ONE CLEAN BUILD AND NO FOLLOW-UP QUESTIONS.",
+        "A SMALL DAEMON STAMPS YOUR PRAYER AS \"WORKS ON MY MACHINE.\""
     ];
 
     private static readonly string[] HardPrayerResponses =
@@ -37,7 +41,10 @@ public sealed class ShellCurseState : ICursedShell
         "THE BUILD SPIRITS REQUEST ONE MORE CLEAN RELOAD.",
         "A STACK TRACE CRAWLS ACROSS THE ALTAR.",
         "THE DAEMON IN THE PATH ASKS FOR A SECOND TITHING.",
-        "THE MODULE CACHE WHISPERS ABOUT COMMITMENT ISSUES."
+        "THE MODULE CACHE WHISPERS ABOUT COMMITMENT ISSUES.",
+        "THE SHELL ACCEPTS YOUR OFFERING AND OPENS A CHANGE REQUEST.",
+        "A BUILD GOBLIN SCREAMS INTO THE PACKAGE CACHE.",
+        "THE RITUAL CIRCLE PASSES STATIC ANALYSIS, SOMEHOW."
     ];
 
     private static readonly string[] BlessingMessages =
@@ -45,7 +52,10 @@ public sealed class ShellCurseState : ICursedShell
         "The shell feels briefly less cursed.",
         "The daemon in the PATH has been appeased.",
         "A stack trace bows and backs away.",
-        "The build spirits have accepted your paperwork."
+        "The build spirits have accepted your paperwork.",
+        "A tiny green checkmark appears in the smoke.",
+        "The shell grants one unit of plausible deniability.",
+        "The curse looks away for exactly one command."
     ];
 
     private static readonly string[] FortuneTexts =
@@ -57,7 +67,11 @@ public sealed class ShellCurseState : ICursedShell
         "The heap remembers what the stack denies.",
         "Your next command has been reviewed by three ghosts and one linter.",
         "Somewhere, a shell script is becoming self-aware.",
-        "The prophecy says: try not to refactor the folder structure today."
+        "The prophecy says: try not to refactor the folder structure today.",
+        "A ritual written after midnight will contain at least one questionable alias.",
+        "The next script will work until you add logging.",
+        "Beware the command that only fails when observed by CI.",
+        "A clean working tree is a temporary emotional state."
     ];
 
     private static readonly string[] NeutralOmenMessages =
@@ -88,7 +102,10 @@ public sealed class ShellCurseState : ICursedShell
         "The command fizzles. You forgot to pray.",
         "The shell rejects your offering.",
         "A daemon whispers: not this time.",
-        "The pipes demand tribute. Try pray."
+        "The pipes demand tribute. Try pray.",
+        "The command trips over a suspiciously placed semicolon.",
+        "The shell refuses on religious grounds.",
+        "A goblin in the parser shakes its tiny head."
     ];
 
     private static readonly string[] AmbientMessages =
@@ -101,7 +118,11 @@ public sealed class ShellCurseState : ICursedShell
         "The curse rearranges nothing, suspiciously.",
         "Tab completion dreams of teeth.",
         "The shell whispers: clean build, clean conscience.",
-        "A plugin somewhere feels judged."
+        "A plugin somewhere feels judged.",
+        "A ritual file rustles inside .rsh.",
+        "The command history pretends it saw nothing.",
+        "Somewhere, a profile script feels underappreciated.",
+        "The shell briefly considers becoming PowerShell, then recovers."
     ];
 
     private static readonly string[] AmbientSuccessMessages =
@@ -427,6 +448,49 @@ public sealed class ShellCurseState : ICursedShell
         return ProtectedCommands;
     }
 
+    public void ObserveRitualStarted(string ritualName)
+    {
+        if (!Enabled)
+        {
+            return;
+        }
+
+        var normalizedRitualName = NormalizeRitualName(ritualName);
+        if (normalizedRitualName is null)
+        {
+            return;
+        }
+
+        AddJournalEvent(
+            $"Ritual '{normalizedRitualName}' begins. The shell draws a circle around the working directory.");
+    }
+
+    public void ObserveRitualCompleted(string ritualName, int exitCode)
+    {
+        if (!Enabled)
+        {
+            return;
+        }
+
+        var normalizedRitualName = NormalizeRitualName(ritualName);
+        if (normalizedRitualName is null)
+        {
+            return;
+        }
+
+        if (exitCode == 0)
+        {
+            AddJournalEvent(
+                $"Ritual '{normalizedRitualName}' completed successfully. The curse pretends this was its idea.");
+            ShiftMood(_random.Next(2) == 0 ? "watchful" : "satisfied");
+            return;
+        }
+
+        AddJournalEvent(
+            $"Ritual '{normalizedRitualName}' failed with exit code {exitCode}. The chalk circle has questions.");
+        ShiftMood("suspicious");
+    }
+
     public void GrantNextCommandGrace(int percent)
     {
         NextCommandGraceChancePercent = Math.Clamp(percent, 0, 50);
@@ -557,6 +621,12 @@ public sealed class ShellCurseState : ICursedShell
         {
             _journal.Dequeue();
         }
+    }
+
+    private static string? NormalizeRitualName(string ritualName)
+    {
+        var normalized = ritualName?.Trim();
+        return string.IsNullOrWhiteSpace(normalized) ? null : normalized;
     }
 }
 

@@ -166,12 +166,26 @@ public sealed class ShellHost
         bool continueOnError,
         CancellationToken cancellationToken)
     {
-        return await ExecuteScriptFileAsync(
+        var ritualName = Path.GetFileNameWithoutExtension(ritualPath);
+        var shouldObserveRitual = _curseState.Enabled && !string.IsNullOrWhiteSpace(ritualName) && File.Exists(ritualPath);
+        if (shouldObserveRitual)
+        {
+            _curseState.ObserveRitualStarted(ritualName);
+        }
+
+        var exitCode = await ExecuteScriptFileAsync(
             context,
             ritualPath,
             continueOnError,
             new CommandExecutionOptions(EchoCommand: true, TriggerCommandHooks: false, RecordHistory: false, AllowCurse: false, AllowAmbient: false),
             cancellationToken);
+
+        if (shouldObserveRitual)
+        {
+            _curseState.ObserveRitualCompleted(ritualName, exitCode);
+        }
+
+        return exitCode;
     }
 
     public async Task<int> RunAutomationCommandAsync(

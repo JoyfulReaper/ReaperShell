@@ -179,7 +179,7 @@ Color output follows `ShellSettings.ColorMode`, and redirected output stays plai
 
 Cursed mode is an optional toy mode for making the shell feel haunted. It is off by default.
 
-When enabled, ReaperShell may occasionally refuse to run a normal user command before execution. It does not interrupt commands after they start, and it does not make destructive commands partially execute. Protected commands such as `curse`, `pray`, `fortune`, `help`, `exit`, `quit`, `history`, and `doctor` are not blocked.
+When enabled, ReaperShell may occasionally refuse to run a normal user command before execution. It does not interrupt commands after they start, and it does not make destructive commands partially execute. Protected commands such as `curse`, `pray`, `fortune`, `ritual`, `help`, `exit`, `quit`, `history`, and `doctor` are not blocked.
 
 Useful commands:
 
@@ -199,6 +199,8 @@ Useful commands:
 - `pray hard` adds extra blessing charges
 - `fortune` and `fortune read` print a fortune and may add a small omen effect
 - `fortune status` shows the curse state and the last omen
+- `ritual` is protected from cursed command blocking
+- user-run rituals can add harmless curse journal entries when cursed mode is enabled, but commands inside rituals still run with curse blocking and ambient chatter disabled
 
 Examples:
 

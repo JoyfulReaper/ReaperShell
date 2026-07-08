@@ -283,6 +283,7 @@ public sealed class CurseModeTests
         registry.RegisterBuiltIn(new ConstantCommand("history", "history-ran"));
         registry.RegisterBuiltIn(new ConstantCommand("doctor", "doctor-ran"));
         registry.RegisterBuiltIn(new ConstantCommand("fortune", "fortune-ran"));
+        registry.RegisterBuiltIn(new ConstantCommand("ritual", "ritual-ran"));
 
         var host = new ShellHost(
             parser,
@@ -293,7 +294,7 @@ public sealed class CurseModeTests
             Path.Combine(Path.GetTempPath(), "ReaperShell.CurseModeTests"),
             curseState: curseState);
 
-        foreach (var protectedCommand in new[] { "help", "exit", "quit", "history", "doctor", "fortune" })
+        foreach (var protectedCommand in new[] { "help", "exit", "quit", "history", "doctor", "fortune", "ritual" })
         {
             var (exitCode, stdout, stderr) = await RunHostCommandAsync(host, protectedCommand);
 
@@ -309,6 +310,144 @@ public sealed class CurseModeTests
         Assert.DoesNotContain("storm-ran", blocked.StdOut);
         Assert.Contains("forgot to pray", blocked.StdErr, StringComparison.OrdinalIgnoreCase);
         Assert.Equal(1, curseState.AttemptedCommands);
+    }
+
+    [Fact]
+    public void RitualIsProtectedFromCursedBlockingWithoutCountingAsAnAttempt()
+    {
+        var curseState = new ShellCurseState(new SequenceCurseRandom(0));
+        curseState.Enable();
+        curseState.TrySetFailureChance(100);
+
+        var decision = curseState.EvaluateBeforeCommand("ritual", allowCurse: true);
+
+        Assert.False(decision.BlockCommand);
+        Assert.Null(decision.Message);
+        Assert.Equal(0, curseState.AttemptedCommands);
+    }
+
+    [Fact]
+    public async Task UserRunRitualAddsJournalEntriesAndLeavesInnerCommandsUncursed()
+    {
+        var curseState = new ShellCurseState(new SequenceCurseRandom(0, 0));
+        curseState.Enable();
+        curseState.TrySetFailureChance(100);
+
+        var parser = new CommandParser();
+        var registry = new CommandRegistry();
+        registry.RegisterBuiltIn(new ConstantCommand("storm", "storm-ran"));
+
+        var stateDirectory = Path.Combine(
+            Path.GetTempPath(),
+            "ReaperShell.CurseModeTests",
+            Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(Path.Combine(stateDirectory, "rituals"));
+        var ritualPath = Path.Combine(stateDirectory, "rituals", "deploy-local.rsh");
+        await File.WriteAllTextAsync(ritualPath, "storm");
+
+        var host = new ShellHost(
+            parser,
+            registry,
+            new ShellLifetime(),
+            new ProcessRunner(),
+            new ShellSettings(),
+            stateDirectory,
+            curseState: curseState);
+
+        var stdout = new StringWriter();
+        var stderr = new StringWriter();
+        var context = new ShellContext(stdout, stderr, new DirectoryInfo(stateDirectory), services: null, CancellationToken.None);
+        var exitCode = await host.RunRitualAsync(context, ritualPath, continueOnError: false, CancellationToken.None);
+
+        Assert.Equal(0, exitCode);
+        Assert.Contains("storm-ran", stdout.ToString());
+        Assert.Equal(0, curseState.AttemptedCommands);
+        Assert.Equal("watchful", curseState.Mood);
+
+        var journal = string.Join(Environment.NewLine, curseState.GetJournalLines());
+        Assert.Contains("Ritual 'deploy-local' begins", journal);
+        Assert.Contains("Ritual 'deploy-local' completed successfully", journal);
+    }
+
+    [Fact]
+    public async Task FailedRitualRecordsFailureEventAndSuspiciousMood()
+    {
+        var curseState = new ShellCurseState(new SequenceCurseRandom(0));
+        curseState.Enable();
+
+        var parser = new CommandParser();
+        var registry = new CommandRegistry();
+        registry.RegisterBuiltIn(new FailCommand());
+
+        var stateDirectory = Path.Combine(
+            Path.GetTempPath(),
+            "ReaperShell.CurseModeTests",
+            Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(Path.Combine(stateDirectory, "rituals"));
+        var ritualPath = Path.Combine(stateDirectory, "rituals", "broken.rsh");
+        await File.WriteAllTextAsync(ritualPath, "failcmd");
+
+        var host = new ShellHost(
+            parser,
+            registry,
+            new ShellLifetime(),
+            new ProcessRunner(),
+            new ShellSettings(),
+            stateDirectory,
+            curseState: curseState);
+
+        var stdout = new StringWriter();
+        var stderr = new StringWriter();
+        var context = new ShellContext(stdout, stderr, new DirectoryInfo(stateDirectory), services: null, CancellationToken.None);
+        var exitCode = await host.RunRitualAsync(context, ritualPath, continueOnError: false, CancellationToken.None);
+
+        Assert.Equal(7, exitCode);
+        Assert.Equal("suspicious", curseState.Mood);
+
+        var journal = string.Join(Environment.NewLine, curseState.GetJournalLines());
+        Assert.Contains("Ritual 'broken' begins", journal);
+        Assert.Contains("Ritual 'broken' failed with exit code 7", journal);
+    }
+
+    [Fact]
+    public async Task HookTriggeredRitualsDoNotAddRitualJournalEntries()
+    {
+        var curseState = new ShellCurseState(new SequenceCurseRandom(0));
+        curseState.Enable();
+
+        var parser = new CommandParser();
+        var registry = new CommandRegistry();
+        registry.RegisterBuiltIn(new ConstantCommand("echo-ritual", "hook-ran"));
+
+        var stateDirectory = Path.Combine(
+            Path.GetTempPath(),
+            "ReaperShell.CurseModeTests",
+            Guid.NewGuid().ToString("N"));
+        var ritualsDirectory = Path.Combine(stateDirectory, "rituals");
+        Directory.CreateDirectory(ritualsDirectory);
+        await File.WriteAllTextAsync(Path.Combine(ritualsDirectory, "hooked.rsh"), "echo-ritual");
+
+        var settings = new ShellSettings();
+        settings.Hooks[ShellHookEventNames.Startup] = ["hooked"];
+
+        var host = new ShellHost(
+            parser,
+            registry,
+            new ShellLifetime(),
+            new ProcessRunner(),
+            settings,
+            stateDirectory,
+            curseState: curseState);
+
+        var stdout = new StringWriter();
+        var stderr = new StringWriter();
+        var context = new ShellContext(stdout, stderr, new DirectoryInfo(stateDirectory), services: null, CancellationToken.None);
+        await host.RunHookEventAsync(context, ShellHookEventNames.Startup, CancellationToken.None);
+
+        var journal = string.Join(Environment.NewLine, curseState.GetJournalLines());
+        Assert.DoesNotContain("Ritual 'hooked' begins", journal);
+        Assert.DoesNotContain("Ritual 'hooked' completed", journal);
+        Assert.Contains("hook-ran", stdout.ToString());
     }
 
     [Fact]
@@ -433,6 +572,22 @@ public sealed class CurseModeTests
         {
             context.WriteLine(_output);
             return Task.FromResult(0);
+        }
+    }
+
+    private sealed class FailCommand : IShellCommand
+    {
+        public string Name => "failcmd";
+
+        public string Description => "Always fails.";
+
+        public Task<int> ExecuteAsync(
+            ShellContext context,
+            IReadOnlyList<string> args,
+            CancellationToken cancellationToken = default)
+        {
+            context.WriteErrorLine("failcmd failed");
+            return Task.FromResult(7);
         }
     }
 
