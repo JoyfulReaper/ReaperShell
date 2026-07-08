@@ -153,7 +153,7 @@ Color output follows `ShellSettings.ColorMode`, and redirected output stays plai
 | `history` | Prints session history, or clears it. | `history` or `history clear` | `history clear` |
 | `env` | Lists and manages session-scoped environment overrides. | `env`, `env get <name>`, `env set <name> <value>`, `env unset <name>` | `env set FOO bar` |
 | `alias` | Lists and manages aliases. | `alias`, `alias set <name> <replacement>`, `alias remove <name>`, `alias clear`, `alias show <name>` | `alias set ll "ls -a"` |
-| `ritual` | Lists, creates, and runs ritual scripts. | `ritual list`, `ritual run <name> [--continue-on-error]`, `ritual path`, `ritual new <name>` | `ritual run awaken` |
+| `ritual` | Lists, creates, and runs ritual scripts. | `ritual list`, `ritual run <name> [--continue-on-error] [args...]`, `ritual path`, `ritual new <name>` | `ritual run awaken` |
 | `hook` | Lists and manages shell event hooks. | `hook list`, `hook add <event> <ritual-name>`, `hook remove <event> <ritual-name>`, `hook clear <event>`, `hook events` | `hook add startup awaken` |
 | `command` | Lists and forges commands inside a command pack. | `command templates`, `command list <repo>`, `command new <repo> <command-name> [--template <basic|file|process>] [--language <csharp|fsharp|vb>]`, `command <remove|delete|rm> <repo> <command-name>` | `command new tools hello-kyle --language csharp` |
 | `which` | Shows where a command comes from. | `which <command>` | `which hello` |
@@ -412,8 +412,8 @@ Rituals are named `.rsh` scripts stored under `.rsh/rituals/`.
 - `ritual list` lists available ritual names
 - `ritual path` prints the rituals directory
 - `ritual new <name>` creates a new ritual
-- `ritual run <name>` runs one ritual
-- `ritual run <name> --continue-on-error` keeps going after failures
+- `ritual run <name> [--continue-on-error] [args...]` runs one ritual
+- Rituals can use `$0`, `$1`, `$*`, `$?`, `${name}`, and `$$` for simple variable expansion
 
 ### Hooks
 

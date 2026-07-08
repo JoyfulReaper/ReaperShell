@@ -357,7 +357,7 @@ public sealed class CurseModeTests
         var stdout = new StringWriter();
         var stderr = new StringWriter();
         var context = new ShellContext(stdout, stderr, new DirectoryInfo(stateDirectory), services: null, CancellationToken.None);
-        var exitCode = await host.RunRitualAsync(context, ritualPath, continueOnError: false, CancellationToken.None);
+        var exitCode = await host.RunRitualAsync(context, ritualPath, continueOnError: false, [], CancellationToken.None);
 
         Assert.Equal(0, exitCode);
         Assert.Contains("storm-ran", stdout.ToString());
@@ -399,7 +399,7 @@ public sealed class CurseModeTests
         var stdout = new StringWriter();
         var stderr = new StringWriter();
         var context = new ShellContext(stdout, stderr, new DirectoryInfo(stateDirectory), services: null, CancellationToken.None);
-        var exitCode = await host.RunRitualAsync(context, ritualPath, continueOnError: false, CancellationToken.None);
+        var exitCode = await host.RunRitualAsync(context, ritualPath, continueOnError: false, [], CancellationToken.None);
 
         Assert.Equal(7, exitCode);
         Assert.Equal("suspicious", curseState.Mood);
