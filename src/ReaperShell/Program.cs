@@ -42,10 +42,12 @@ internal static class Program
         var parser = new CommandParser();
         var registry = new CommandRegistry();
         var sessionState = new ShellSessionState();
+        var curseState = new ShellCurseState();
+        var shellServices = new ShellServiceProvider().Add<ReaperShell.Abstractions.ICursedShell>(curseState);
         var processRunner = new ProcessRunner(sessionState);
         var commandPackManager = new CommandPackManager(registry, processRunner, workspaceRoot);
         var lifetime = new ShellLifetime();
-        var host = new ShellHost(parser, registry, lifetime, processRunner, settings, stateDirectory, sessionState);
+        var host = new ShellHost(parser, registry, lifetime, processRunner, settings, stateDirectory, sessionState, curseState);
         var watchService = new ShellWatchService(host);
         var editorLauncher = new EditorLauncher(settings, processRunner);
 
@@ -59,6 +61,7 @@ internal static class Program
             host,
             watchService,
             editorLauncher,
+            curseState,
             workspaceRoot,
             stateDirectory);
 
@@ -66,7 +69,7 @@ internal static class Program
             Console.Out,
             Console.Error,
             new DirectoryInfo(workingDirectory),
-            services: null,
+            services: shellServices,
             cancellationToken: CancellationToken.None,
             colorMode: settings.ColorMode);
 
@@ -126,6 +129,7 @@ internal static class Program
         ShellHost host,
         ShellWatchService watchService,
         EditorLauncher editorLauncher,
+        ShellCurseState curseState,
         string workspaceRoot,
         string stateDirectory)
     {
@@ -170,8 +174,9 @@ internal static class Program
                 editorLauncher,
                 watchService,
                 stateDirectory));
-        registry.RegisterBuiltIn(new FortuneCommand());
-        registry.RegisterBuiltIn(new PrayCommand());
+        registry.RegisterBuiltIn(new FortuneCommand(curseState));
+        registry.RegisterBuiltIn(new PrayCommand(curseState));
+        registry.RegisterBuiltIn(new CurseCommand(curseState));
         registry.RegisterBuiltIn(new ReloadCommand(host));
         var repoCommand = new RepoCommand(
             settings,

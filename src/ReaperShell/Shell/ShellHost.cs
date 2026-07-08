@@ -18,6 +18,7 @@ public sealed class ShellHost
     private readonly ProcessRunner _processRunner;
     private readonly string _stateDirectory;
     private readonly SemaphoreSlim _interactivePromptReady = new(0, 1);
+    private readonly ShellCurseState _curseState;
     private readonly ShellSessionState _sessionState;
     private readonly ShellSettings _settings;
     private string? _currentProfilePath;
@@ -29,7 +30,8 @@ public sealed class ShellHost
         ProcessRunner processRunner,
         ShellSettings settings,
         string stateDirectory,
-        ShellSessionState? sessionState = null)
+        ShellSessionState? sessionState = null,
+        ShellCurseState? curseState = null)
     {
         _commandParser = commandParser;
         _commandRegistry = commandRegistry;
@@ -38,6 +40,7 @@ public sealed class ShellHost
         _settings = settings;
         _stateDirectory = stateDirectory;
         _sessionState = sessionState ?? new ShellSessionState();
+        _curseState = curseState ?? new ShellCurseState();
     }
 
     public bool IsInteractiveModeEnabled { get; private set; }
@@ -77,7 +80,7 @@ public sealed class ShellHost
                     var exitCode = await ExecuteCommandAsync(
                         queuedCommand.Context,
                         queuedCommand.CommandText,
-                        new CommandExecutionOptions(EchoCommand: queuedCommand.EchoCommand, TriggerCommandHooks: false),
+                        new CommandExecutionOptions(EchoCommand: queuedCommand.EchoCommand, TriggerCommandHooks: false, AllowCurse: false, AllowAmbient: false),
                         queuedCommand.CancellationToken);
                     queuedCommand.Completion.TrySetResult(exitCode);
                     continue;
@@ -92,7 +95,7 @@ public sealed class ShellHost
                 await ExecuteCommandAsync(
                     context,
                     input,
-                    new CommandExecutionOptions(EchoCommand: false, TriggerCommandHooks: true),
+                    new CommandExecutionOptions(EchoCommand: false, TriggerCommandHooks: true, AllowCurse: true, AllowAmbient: true),
                     cancellationToken);
                 SignalInteractivePromptReady();
             }
@@ -117,7 +120,7 @@ public sealed class ShellHost
             context,
             scriptPath,
             continueOnError,
-            new CommandExecutionOptions(EchoCommand: true, TriggerCommandHooks: true, RecordHistory: false),
+            new CommandExecutionOptions(EchoCommand: true, TriggerCommandHooks: true, RecordHistory: false, AllowCurse: false, AllowAmbient: false),
             cancellationToken);
     }
 
@@ -130,7 +133,7 @@ public sealed class ShellHost
         return await ExecuteCommandAsync(
             context,
             commandText,
-            new CommandExecutionOptions(EchoCommand: false, TriggerCommandHooks: true),
+            new CommandExecutionOptions(EchoCommand: false, TriggerCommandHooks: true, AllowCurse: true, AllowAmbient: true),
             cancellationToken);
     }
 
@@ -151,7 +154,7 @@ public sealed class ShellHost
             context,
             profilePath,
             continueOnError: true,
-            new CommandExecutionOptions(EchoCommand: true, TriggerCommandHooks: false, RecordHistory: false),
+            new CommandExecutionOptions(EchoCommand: true, TriggerCommandHooks: false, RecordHistory: false, AllowCurse: false, AllowAmbient: false),
             cancellationToken);
     }
 
@@ -165,7 +168,7 @@ public sealed class ShellHost
             context,
             ritualPath,
             continueOnError,
-            new CommandExecutionOptions(EchoCommand: true, TriggerCommandHooks: false, RecordHistory: false),
+            new CommandExecutionOptions(EchoCommand: true, TriggerCommandHooks: false, RecordHistory: false, AllowCurse: false, AllowAmbient: false),
             cancellationToken);
     }
 
@@ -178,7 +181,7 @@ public sealed class ShellHost
         return await ExecuteCommandAsync(
             context,
             commandText,
-            new CommandExecutionOptions(EchoCommand: echoCommand, TriggerCommandHooks: false, RecordHistory: false),
+            new CommandExecutionOptions(EchoCommand: echoCommand, TriggerCommandHooks: false, RecordHistory: false, AllowCurse: false, AllowAmbient: false),
             cancellationToken);
     }
 
@@ -241,7 +244,7 @@ public sealed class ShellHost
                     context,
                     ritualPath,
                     continueOnError: true,
-                    new CommandExecutionOptions(EchoCommand: false, TriggerCommandHooks: false, RecordHistory: false),
+                    new CommandExecutionOptions(EchoCommand: false, TriggerCommandHooks: false, RecordHistory: false, AllowCurse: false, AllowAmbient: false),
                     cancellationToken);
 
                 if (exitCode != 0)
@@ -298,6 +301,18 @@ public sealed class ShellHost
                 _sessionState.RecordHistory(input);
             }
 
+            var curseDecision = _curseState.EvaluateBeforeCommand(resolvedTokens[0], options.AllowCurse);
+            if (curseDecision.Message is not null)
+            {
+                if (curseDecision.BlockCommand)
+                {
+                    context.WriteErrorLine(curseDecision.Message);
+                    return 1;
+                }
+
+                context.WriteLine(curseDecision.Message);
+            }
+
             if (options.TriggerCommandHooks)
             {
                 await RunHookEventAsync(context, ShellHookEventNames.BeforeCommand, cancellationToken);
@@ -312,10 +327,12 @@ public sealed class ShellHost
                         context,
                         resolvedTokens,
                         cancellationToken);
+                    MaybeEmitAmbientMessage(context, resolvedTokens[0], exitCode, options);
                     return exitCode;
                 }
 
                 exitCode = await command.ExecuteAsync(context, resolvedTokens.Skip(1).ToArray(), cancellationToken);
+                MaybeEmitAmbientMessage(context, resolvedTokens[0], exitCode, options);
                 return exitCode;
             }
             catch (OperationCanceledException)
@@ -334,6 +351,7 @@ public sealed class ShellHost
                 }
             }
 
+            MaybeEmitAmbientMessage(context, resolvedTokens[0], exitCode, options);
             return exitCode;
         }
         finally
@@ -486,6 +504,27 @@ public sealed class ShellHost
         context.WriteErrorLine(hint);
     }
 
+    private void MaybeEmitAmbientMessage(
+        ShellContext context,
+        string commandName,
+        int exitCode,
+        CommandExecutionOptions options)
+    {
+        if (!options.AllowAmbient)
+        {
+            return;
+        }
+
+        var ambientMessage = _curseState.TryGetAmbientMessage(commandName, exitCode);
+        if (ambientMessage is null)
+        {
+            return;
+        }
+
+        _curseState.AddAmbientEvent(ambientMessage);
+        context.WriteLine(ambientMessage);
+    }
+
     public async Task<int> ReloadAsync(ShellContext context, CancellationToken cancellationToken)
     {
         try
@@ -564,12 +603,21 @@ public sealed class ShellHost
 
     internal string FormatPrompt(ShellContext context)
     {
-        if (!_settings.ShowPathInPrompt)
+        var prompt = _settings.ShowPathInPrompt
+            ? FormatPrompt(context.WorkingDirectory.FullName)
+            : "rsh> ";
+
+        if (_curseState.Enabled)
         {
-            return "rsh> ";
+            return "☠ " + prompt;
         }
 
-        return FormatPrompt(context.WorkingDirectory.FullName);
+        if (!_settings.ShowPathInPrompt)
+        {
+            return prompt;
+        }
+
+        return prompt;
     }
 
     internal static string FormatPrompt(string workingDirectory)
@@ -621,7 +669,7 @@ public sealed class ShellHost
     }
 }
 
-public sealed record CommandExecutionOptions(bool EchoCommand, bool TriggerCommandHooks, bool RecordHistory = true);
+public sealed record CommandExecutionOptions(bool EchoCommand, bool TriggerCommandHooks, bool RecordHistory = true, bool AllowCurse = false, bool AllowAmbient = false);
 
 internal sealed record QueuedInteractiveCommand(
     ShellContext Context,

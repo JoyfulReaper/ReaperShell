@@ -163,8 +163,9 @@ Color output follows `ShellSettings.ColorMode`, and redirected output stays plai
 | `banner` | Prints the shell banner again. | `banner` | `banner` |
 | `status` | Prints shell runtime status. | `status` | `status` |
 | `doctor` | Runs a focused environment self-check. | `doctor [--verbose]` | `doctor --verbose` |
-| `fortune` | Prints a small shell fortune. | `fortune` | `fortune` |
-| `pray` | Prints a pseudo-ritual shell response. | `pray` | `pray` |
+| `curse` | Enables, disables, inspects, and configures cursed mode. | `curse [status\|inspect\|journal\|poke\|enable\|disable\|exorcise\|quiet\|listen\|chatter <percent>\|set-failure-rate <percent>]` | `curse inspect` |
+| `pray` | Adds blessing charges or reports curse status when cursed mode is active. | `pray [status\|hard]` | `pray hard` |
+| `fortune` | Prints a small shell fortune or omen. | `fortune [read\|status]` | `fortune status` |
 | `reload` | Reloads settings and the active profile. | `reload` | `reload` |
 
 ### Repository And Plugin Management
@@ -173,6 +174,83 @@ Color output follows `ShellSettings.ColorMode`, and redirected output stays plai
 | --- | --- | --- | --- |
 | `repo` | Manages command-pack repositories. | See the repo sections below. | `repo list` |
 | `plugins` | Lists loaded command packs and their commands. | `plugins` | `plugins` |
+
+## Cursed Mode
+
+Cursed mode is an optional toy mode for making the shell feel haunted. It is off by default.
+
+When enabled, ReaperShell may occasionally refuse to run a normal user command before execution. It does not interrupt commands after they start, and it does not make destructive commands partially execute. Protected commands such as `curse`, `pray`, `fortune`, `help`, `exit`, `quit`, `history`, and `doctor` are not blocked.
+
+Useful commands:
+
+- `curse enable` turns cursed mode on
+- `curse disable` turns it off and clears blessing charges
+- `curse exorcise` is a more dramatic disable
+- `curse status` shows the core state
+- `curse inspect` shows a richer status view, including ambient chatter and protected commands
+- `curse journal` prints recent curse events
+- `curse quiet` silences ambient chatter
+- `curse listen` restores the default ambient chatter rate
+- `curse chatter <percent>` sets ambient chatter from `0` to `25`
+- `curse poke` provokes a harmless reaction
+- `curse set-failure-rate <percent>` sets the command failure chance from `0` to `50`
+- `pray` adds blessing charges when cursed
+- `pray status` shows the current curse state
+- `pray hard` adds extra blessing charges
+- `fortune` and `fortune read` print a fortune and may add a small omen effect
+- `fortune status` shows the curse state and the last omen
+
+Examples:
+
+```text
+rsh> curse enable
+Cursed mode enabled. This is intentionally silly and opt-in.
+Mood: petty. Failure chance: 15%.
+
+rsh> pray
+THE HEAP ACCEPTS YOUR OFFERING.
+Blessing charges increased to 3.
+
+rsh> curse inspect
+Cursed mode: enabled
+Blessing charges: 3
+Failure chance: 15%
+Mood: petty
+Ambient chatter: 5%
+Last omen: Good omen: the daemon grants one blessing charge.
+Ambient flavor: listening
+Protected commands: pray, curse, fortune, help, exit, quit, history, doctor
+
+rsh> fortune
+A clean build is just a failed build that has not happened yet.
+Good omen: the daemon grants one blessing charge.
+
+rsh> curse exorcise
+The curse screams in YAML and leaves. Blessing charges cleared.
+```
+
+### How Command Blocking Works
+
+- Blocking happens before execution starts.
+- Blessing charges are consumed before failure checks.
+- The curse state keeps blocking and ambient flavor in memory for the current session.
+- `curse disable` and `curse exorcise` clear blessing charges and turn cursed mode off.
+- Cursed mode does not affect profile loading, hooks, rituals, or internal automation unless those paths are explicitly user-driven.
+- Scripts are not randomly cursed; the host only applies curse blocking to normal user commands.
+
+Command packs can opt in safely through `ICursedShell` on `ShellContext.Services`:
+
+```csharp
+using ReaperShell.Abstractions;
+
+var curse = context.Services?.GetService(typeof(ICursedShell)) as ICursedShell;
+if (curse?.IsEnabled == true)
+{
+    curse.AddAmbientEvent("The custom command leaves a strange smell in the heap.");
+}
+```
+
+Cursed mode never makes commands partially execute or destructive behavior more dangerous.
 
 ## Command Packs And Plugins
 
@@ -375,6 +453,8 @@ Key files and directories:
 - `.rsh/rituals/` stores ritual scripts
 - `.rsh/repos/` stores managed local repos created by `repo new` or some Git URL workflows
 
+Cursed mode state is session-only. Blessing charges, ambient chatter level, mood, the journal, and other curse flavor live in memory for the current process and are not persisted in `.rsh/settings.json`.
+
 What to commit:
 
 - commit source files, command-pack projects, manifests, and intentional pack content
@@ -449,6 +529,9 @@ rsh> hello
 - `missing ReaperShell.Abstractions`: make sure command projects reference the workspace copy of `ReaperShell.Abstractions`
 - `scripts not running`: check the script path, and remember that `--continue-on-error` only applies to script execution
 - `profile path issues`: verify `.rsh/profile.rsh` exists, or use `--profile <path>` to point at a specific profile
+- `commands sometimes refuse to run`: check whether cursed mode is enabled with `curse status` or `curse inspect`; run `curse disable` or `curse exorcise` to turn it off
+- `ambient messages are too noisy`: use `curse quiet` or lower chatter with `curse chatter <percent>`
+- `command packs do not see cursed mode`: make sure they reference the current `ReaperShell.Abstractions` package and check `ShellContext.Services` for `ICursedShell`
 
 ## Development
 

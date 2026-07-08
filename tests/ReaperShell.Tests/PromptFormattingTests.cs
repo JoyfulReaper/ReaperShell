@@ -36,6 +36,20 @@ public sealed class PromptFormattingTests
     }
 
     [Fact]
+    public void CursedPromptIncludesMarker()
+    {
+        var curseState = new ShellCurseState(new SequenceCurseRandom(0));
+        curseState.Enable();
+
+        var host = CreateHost(showPathInPrompt: false, curseState);
+        var context = CreateContext(Path.Combine(Path.GetTempPath(), "ReaperShell.PromptFormattingTests", Guid.NewGuid().ToString("N")));
+
+        var prompt = host.FormatPrompt(context);
+
+        Assert.Equal("☠ rsh> ", prompt);
+    }
+
+    [Fact]
     public async Task PromptUpdatesAfterDirectoryChange()
     {
         var root = Path.Combine(Path.GetTempPath(), "ReaperShell.PromptFormattingTests", Guid.NewGuid().ToString("N"));
@@ -74,7 +88,7 @@ public sealed class PromptFormattingTests
         Assert.EndsWith("> ", prompt);
     }
 
-    private static ShellHost CreateHost(bool showPathInPrompt)
+    private static ShellHost CreateHost(bool showPathInPrompt, ShellCurseState? curseState = null)
     {
         var settings = new ShellSettings { ShowPathInPrompt = showPathInPrompt };
         return new ShellHost(
@@ -83,7 +97,8 @@ public sealed class PromptFormattingTests
             new ShellLifetime(),
             new ProcessRunner(),
             settings,
-            Path.Combine(Path.GetTempPath(), "ReaperShell.PromptFormattingTests"));
+            Path.Combine(Path.GetTempPath(), "ReaperShell.PromptFormattingTests"),
+            curseState: curseState);
     }
 
     private static ShellContext CreateContext(string workingDirectory)
@@ -94,5 +109,25 @@ public sealed class PromptFormattingTests
             new DirectoryInfo(workingDirectory),
             services: null,
             CancellationToken.None);
+    }
+
+    private sealed class SequenceCurseRandom : ICurseRandom
+    {
+        private readonly Queue<int> _values;
+
+        public SequenceCurseRandom(params int[] values)
+        {
+            _values = new Queue<int>(values);
+        }
+
+        public int Next(int maxExclusive)
+        {
+            if (_values.Count == 0)
+            {
+                return 0;
+            }
+
+            return Math.Max(0, _values.Dequeue() % maxExclusive);
+        }
     }
 }
