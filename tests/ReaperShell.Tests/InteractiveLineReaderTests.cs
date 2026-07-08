@@ -24,6 +24,7 @@ public sealed class InteractiveLineReaderTests
         Assert.Equal("echo hi", line);
         Assert.DoesNotContain("rsh> rsh>", console.Output);
         Assert.True(CountOccurrences(console.Output, "rsh> ") <= 2);
+        Assert.Equal("rsh> ".Length + "echo hi".Length, console.LastSetCursorLeft);
     }
 
     [Fact]
@@ -94,6 +95,7 @@ public sealed class InteractiveLineReaderTests
 
         Assert.Equal("abXc", line);
         Assert.DoesNotContain("rsh> rsh>", console.Output);
+        Assert.Equal("rsh> ".Length + 3, console.LastSetCursorLeft);
     }
 
     [Fact]
@@ -114,6 +116,7 @@ public sealed class InteractiveLineReaderTests
 
         Assert.Equal("Xabc", line);
         Assert.DoesNotContain("rsh> rsh>", console.Output);
+        Assert.Equal("rsh> ".Length + 1, console.LastSetCursorLeft);
     }
 
     [Fact]
@@ -133,6 +136,7 @@ public sealed class InteractiveLineReaderTests
 
         Assert.Equal("echo old", line);
         Assert.DoesNotContain("rsh> rsh>", console.Output);
+        Assert.Equal("rsh> ".Length + "echo old".Length, console.LastSetCursorLeft);
     }
 
     [Fact]
@@ -152,6 +156,7 @@ public sealed class InteractiveLineReaderTests
             CancellationToken.None);
 
         Assert.Equal("a", line);
+        Assert.Equal("rsh> ".Length + 1, console.LastSetCursorLeft);
     }
 
     [Fact]
@@ -254,6 +259,10 @@ public sealed class InteractiveLineReaderTests
 
         public int BufferWidth { get; set; } = 120;
 
+        public int LastSetCursorLeft { get; private set; }
+
+        public int LastSetCursorTop { get; private set; }
+
         public bool TreatControlCAsInput { get; set; }
 
         public string Output { get; private set; } = string.Empty;
@@ -279,6 +288,8 @@ public sealed class InteractiveLineReaderTests
         {
             CursorLeft = left;
             CursorTop = top;
+            LastSetCursorLeft = left;
+            LastSetCursorTop = top;
         }
 
         public void Write(string value)

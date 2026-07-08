@@ -499,13 +499,10 @@ internal sealed class InteractiveLineReader
             _console.Write(new string(' ', trailingSpaces));
         }
 
-        if (buffer.CursorIndex < buffer.Length)
-        {
-            var desiredColumn = Math.Min(
-                prompt.Length + buffer.CursorIndex,
-                Math.Max(0, _console.BufferWidth - 1));
-            _console.SetCursorPosition(desiredColumn, cursorTop);
-        }
+        var desiredColumn = Math.Min(
+            prompt.Length + buffer.CursorIndex,
+            Math.Max(0, _console.BufferWidth - 1));
+        _console.SetCursorPosition(desiredColumn, cursorTop);
 
         _previousRenderLength = currentLine.Length;
     }
