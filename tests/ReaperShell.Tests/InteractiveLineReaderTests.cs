@@ -22,7 +22,8 @@ public sealed class InteractiveLineReaderTests
             CancellationToken.None);
 
         Assert.Equal("echo hi", line);
-        Assert.Equal(2, CountOccurrences(console.Output, "rsh> "));
+        Assert.DoesNotContain("rsh> rsh>", console.Output);
+        Assert.True(CountOccurrences(console.Output, "rsh> ") <= 2);
     }
 
     [Fact]
@@ -51,7 +52,87 @@ public sealed class InteractiveLineReaderTests
 
         Assert.Equal("echo one", first);
         Assert.Equal("echo two", second);
-        Assert.Equal(4, CountOccurrences(console.Output, "rsh> "));
+        Assert.DoesNotContain("rsh> rsh>", console.Output);
+        Assert.True(CountOccurrences(console.Output, "rsh> ") <= 4);
+    }
+
+    [Fact]
+    public async Task PastedCommandDoesNotDoubleRenderPrompt()
+    {
+        var console = new ScriptedInteractiveConsole(
+            Keys("echo pasted", includeEnter: true));
+        var reader = new InteractiveLineReader(console);
+
+        var line = await reader.ReadLineAsync(
+            "rsh> ",
+            () => new DirectoryInfo(Path.GetTempPath()),
+            () => [],
+            () => [],
+            () => [],
+            CancellationToken.None);
+
+        Assert.Equal("echo pasted", line);
+        Assert.DoesNotContain("rsh> rsh>", console.Output);
+        Assert.True(CountOccurrences(console.Output, "rsh> ") <= 2);
+    }
+
+    [Fact]
+    public async Task LeftArrowDoesNotDoubleRenderPrompt()
+    {
+        var console = new ScriptedInteractiveConsole(
+            Keys("abc", includeEnter: false)
+                .Concat([ConsoleKeyInfoFor(ConsoleKey.LeftArrow, '\0'), ConsoleKeyInfoFor(ConsoleKey.X, 'X'), ConsoleKeyInfoFor(ConsoleKey.Enter, '\r')]));
+        var reader = new InteractiveLineReader(console);
+
+        var line = await reader.ReadLineAsync(
+            "rsh> ",
+            () => new DirectoryInfo(Path.GetTempPath()),
+            () => [],
+            () => [],
+            () => [],
+            CancellationToken.None);
+
+        Assert.Equal("abXc", line);
+        Assert.DoesNotContain("rsh> rsh>", console.Output);
+    }
+
+    [Fact]
+    public async Task HomeDoesNotDoubleRenderPrompt()
+    {
+        var console = new ScriptedInteractiveConsole(
+            Keys("abc", includeEnter: false)
+                .Concat([ConsoleKeyInfoFor(ConsoleKey.Home, '\0'), ConsoleKeyInfoFor(ConsoleKey.X, 'X'), ConsoleKeyInfoFor(ConsoleKey.Enter, '\r')]));
+        var reader = new InteractiveLineReader(console);
+
+        var line = await reader.ReadLineAsync(
+            "rsh> ",
+            () => new DirectoryInfo(Path.GetTempPath()),
+            () => [],
+            () => [],
+            () => [],
+            CancellationToken.None);
+
+        Assert.Equal("Xabc", line);
+        Assert.DoesNotContain("rsh> rsh>", console.Output);
+    }
+
+    [Fact]
+    public async Task HistoryNavigationDoesNotDoubleRenderPrompt()
+    {
+        var console = new ScriptedInteractiveConsole(
+            [ConsoleKeyInfoFor(ConsoleKey.UpArrow, '\0'), ConsoleKeyInfoFor(ConsoleKey.Enter, '\r')]);
+        var reader = new InteractiveLineReader(console);
+
+        var line = await reader.ReadLineAsync(
+            "rsh> ",
+            () => new DirectoryInfo(Path.GetTempPath()),
+            () => new[] { "echo old" },
+            () => [],
+            () => [],
+            CancellationToken.None);
+
+        Assert.Equal("echo old", line);
+        Assert.DoesNotContain("rsh> rsh>", console.Output);
     }
 
     [Fact]
@@ -167,6 +248,12 @@ public sealed class InteractiveLineReaderTests
 
         public bool KeyAvailable => _keys.Count > 0;
 
+        public int CursorLeft { get; set; }
+
+        public int CursorTop { get; private set; }
+
+        public int BufferWidth { get; set; } = 120;
+
         public bool TreatControlCAsInput { get; set; }
 
         public string Output { get; private set; } = string.Empty;
@@ -188,20 +275,48 @@ public sealed class InteractiveLineReaderTests
             return RedirectedLine;
         }
 
+        public void SetCursorPosition(int left, int top)
+        {
+            CursorLeft = left;
+            CursorTop = top;
+        }
+
         public void Write(string value)
         {
             Output += value;
+            for (var index = 0; index < value.Length; index++)
+            {
+                var character = value[index];
+                if (character == '\r')
+                {
+                    CursorLeft = 0;
+                    continue;
+                }
+
+                if (character == '\n')
+                {
+                    CursorTop++;
+                    CursorLeft = 0;
+                    continue;
+                }
+
+                CursorLeft++;
+            }
         }
 
         public void WriteLine()
         {
             Output += Environment.NewLine;
+            CursorTop++;
+            CursorLeft = 0;
         }
 
         public void WriteLine(string value)
         {
             Output += value;
             Output += Environment.NewLine;
+            CursorTop++;
+            CursorLeft = 0;
         }
     }
 }

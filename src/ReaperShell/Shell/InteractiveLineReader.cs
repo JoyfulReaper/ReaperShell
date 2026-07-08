@@ -175,6 +175,14 @@ internal sealed class InteractiveLineReader
         while (_console.KeyAvailable)
         {
             var nextKey = _console.ReadKey(intercept: true);
+            if (IsEnterKey(nextKey))
+            {
+                RenderLine(prompt, buffer);
+                _console.WriteLine();
+                batchAction = LineKeyAction.Submit;
+                return true;
+            }
+
             if (IsPlainPrintable(nextKey.KeyChar))
             {
                 ExitHistoryNavigation(buffer, ref historySnapshot, ref historyIndex, ref draftBeforeHistoryNavigation);
@@ -482,6 +490,7 @@ internal sealed class InteractiveLineReader
     private void RenderLine(string prompt, LineEditBuffer buffer)
     {
         var currentLine = prompt + buffer.Text;
+        var cursorTop = _console.CursorTop;
         _console.Write("\r");
         _console.Write(currentLine);
         var trailingSpaces = Math.Max(0, _previousRenderLength - currentLine.Length);
@@ -490,11 +499,12 @@ internal sealed class InteractiveLineReader
             _console.Write(new string(' ', trailingSpaces));
         }
 
-        _console.Write("\r");
-        _console.Write(prompt);
-        if (buffer.CursorIndex > 0)
+        if (buffer.CursorIndex < buffer.Length)
         {
-            _console.Write(buffer.Text[..buffer.CursorIndex]);
+            var desiredColumn = Math.Min(
+                prompt.Length + buffer.CursorIndex,
+                Math.Max(0, _console.BufferWidth - 1));
+            _console.SetCursorPosition(desiredColumn, cursorTop);
         }
 
         _previousRenderLength = currentLine.Length;
