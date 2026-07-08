@@ -63,6 +63,42 @@ public sealed class CommandCompositionParserTests
         }
     }
 
+    [Theory]
+    [InlineData("echo *", new[] { "echo", "*" })]
+    [InlineData("echo *.log", new[] { "echo", "*.log" })]
+    [InlineData("echo *bot*", new[] { "echo", "*bot*" })]
+    [InlineData("grep error logs/*.txt", new[] { "grep", "error", "logs/*.txt" })]
+    [InlineData("iis-error-search --iis-log *bot*", new[] { "iis-error-search", "--iis-log", "*bot*" })]
+    public void BareStarAndGlobLikeArgumentsParseAsWords(string input, string[] expectedTokens)
+    {
+        Assert.True(_parser.TryParse(input, out var commandLine, out var error));
+        Assert.True(string.IsNullOrWhiteSpace(error));
+
+        Assert.Equal(expectedTokens, commandLine!.Pipelines[0].Segments[0].Tokens);
+    }
+
+    [Fact]
+    public void CombinedOverwriteStillParses()
+    {
+        Assert.True(_parser.TryParse("doctor *> all.txt", out var commandLine, out var error));
+        Assert.True(string.IsNullOrWhiteSpace(error));
+
+        var redirection = commandLine!.Pipelines[0].Segments[0].Redirections.Single();
+        Assert.Equal(CommandRedirectionKind.CombinedOverwrite, redirection.Kind);
+        Assert.Equal("all.txt", redirection.TargetPath);
+    }
+
+    [Fact]
+    public void CombinedAppendStillParses()
+    {
+        Assert.True(_parser.TryParse("doctor *>> all.txt", out var commandLine, out var error));
+        Assert.True(string.IsNullOrWhiteSpace(error));
+
+        var redirection = commandLine!.Pipelines[0].Segments[0].Redirections.Single();
+        Assert.Equal(CommandRedirectionKind.CombinedAppend, redirection.Kind);
+        Assert.Equal("all.txt", redirection.TargetPath);
+    }
+
     [Fact]
     public void MissingRedirectionTargetFails()
     {

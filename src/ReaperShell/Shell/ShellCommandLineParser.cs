@@ -321,7 +321,6 @@ public sealed class ShellCommandLineParser
                     return true;
                 }
 
-                invalidOperator = "*";
                 return false;
 
             case ';':
