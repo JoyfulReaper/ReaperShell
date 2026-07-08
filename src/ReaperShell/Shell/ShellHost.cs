@@ -732,7 +732,7 @@ public sealed class ShellHost
 
         if (_curseState.Enabled)
         {
-            return "☠ " + prompt;
+            return "[cursed] " + prompt;
         }
 
         return prompt;

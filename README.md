@@ -181,6 +181,8 @@ Cursed mode is an optional toy mode for making the shell feel haunted. It is off
 
 When enabled, ReaperShell may occasionally refuse to run a normal user command before execution. It does not interrupt commands after they start, and it does not make destructive commands partially execute. Protected commands such as `curse`, `pray`, `fortune`, `ritual`, `help`, `exit`, `quit`, `history`, and `doctor` are not blocked.
 
+The cursed prompt uses an ASCII-safe prefix: `[cursed] `.
+
 Useful commands:
 
 - `curse enable` turns cursed mode on

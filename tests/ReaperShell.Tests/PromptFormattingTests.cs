@@ -36,7 +36,7 @@ public sealed class PromptFormattingTests
     }
 
     [Fact]
-    public void CursedPromptIncludesMarker()
+    public void CursedPromptIncludesAsciiMarker()
     {
         var curseState = new ShellCurseState(new SequenceCurseRandom(0));
         curseState.Enable();
@@ -46,7 +46,10 @@ public sealed class PromptFormattingTests
 
         var prompt = host.FormatPrompt(context);
 
-        Assert.Equal("☠ rsh> ", prompt);
+        Assert.StartsWith("[cursed] ", prompt);
+        Assert.DoesNotContain("☠", prompt);
+        Assert.DoesNotContain("?", prompt);
+        Assert.EndsWith("rsh> ", prompt);
     }
 
     [Fact]
