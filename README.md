@@ -499,6 +499,28 @@ What matters:
 - write errors through `ShellContext.WriteErrorLine`
 - return `0` for success and a non-zero exit code for failure
 
+### Optional: Cursed Mode Integration
+
+Cursed mode is optional. A command can work perfectly well without knowing anything about it, and older hosts may not provide `ICursedShell` at all.
+
+If you do opt in, keep the integration harmless:
+
+- read the shared curse state from `ShellContext.Services`
+- treat curse interactions as flavor, journaling, or small one-shot hints
+- avoid permanent failure changes, file-system side effects, or external process behavior
+
+Example:
+
+```csharp
+using ReaperShell.Abstractions;
+
+var curse = context.Services?.GetService(typeof(ICursedShell)) as ICursedShell;
+if (curse?.IsEnabled == true)
+{
+    curse.AddAmbientEvent("The custom command leaves a strange smell in the heap.");
+}
+```
+
 ## Sample Command Packs
 
 The repository includes sample packs under `sample-packs/`:

@@ -440,12 +440,15 @@ public sealed class ShellCurseState : ICursedShell
             return CurseDecision.Allow();
         }
 
-        AttemptedCommands++;
-
         if (IsProtectedCommand(commandName))
         {
             return CurseDecision.Allow();
         }
+
+        AttemptedCommands++;
+
+        var graceChance = NextCommandGraceChancePercent;
+        NextCommandGraceChancePercent = 0;
 
         if (BlessingCharges > 0)
         {
@@ -463,12 +466,9 @@ public sealed class ShellCurseState : ICursedShell
             return CurseDecision.Allow(blessingMessage);
         }
 
-        var effectiveFailureChance = FailureChancePercent;
-        if (NextCommandGraceChancePercent > 0)
-        {
-            effectiveFailureChance = Math.Max(0, effectiveFailureChance - NextCommandGraceChancePercent);
-            NextCommandGraceChancePercent = 0;
-        }
+        var effectiveFailureChance = graceChance > 0
+            ? Math.Max(0, FailureChancePercent - graceChance)
+            : FailureChancePercent;
 
         if (effectiveFailureChance > 0 && _random.Next(100) < effectiveFailureChance)
         {

@@ -327,13 +327,11 @@ public sealed class ShellHost
                         context,
                         resolvedTokens,
                         cancellationToken);
-                    MaybeEmitAmbientMessage(context, resolvedTokens[0], exitCode, options);
-                    return exitCode;
                 }
-
-                exitCode = await command.ExecuteAsync(context, resolvedTokens.Skip(1).ToArray(), cancellationToken);
-                MaybeEmitAmbientMessage(context, resolvedTokens[0], exitCode, options);
-                return exitCode;
+                else
+                {
+                    exitCode = await command.ExecuteAsync(context, resolvedTokens.Skip(1).ToArray(), cancellationToken);
+                }
             }
             catch (OperationCanceledException)
             {
@@ -610,11 +608,6 @@ public sealed class ShellHost
         if (_curseState.Enabled)
         {
             return "☠ " + prompt;
-        }
-
-        if (!_settings.ShowPathInPrompt)
-        {
-            return prompt;
         }
 
         return prompt;

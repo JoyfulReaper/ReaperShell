@@ -208,21 +208,37 @@ public sealed class CurseModeTests
         var parser = new CommandParser();
         var registry = new CommandRegistry();
         registry.RegisterBuiltIn(new ConstantCommand("git", "git-ran"));
+        registry.RegisterBuiltIn(new EchoCommand());
+
+        var stateDirectory = Path.Combine(
+            Path.GetTempPath(),
+            "ReaperShell.CurseModeTests",
+            Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(Path.Combine(stateDirectory, "rituals"));
+        await File.WriteAllTextAsync(
+            Path.Combine(stateDirectory, "rituals", "after.rsh"),
+            "echo after-hook");
+
+        var settings = new ShellSettings();
+        settings.Hooks[ShellHookEventNames.AfterCommand] = ["after"];
 
         var host = new ShellHost(
             parser,
             registry,
             new ShellLifetime(),
             new ProcessRunner(),
-            new ShellSettings(),
-            Path.Combine(Path.GetTempPath(), "ReaperShell.CurseModeTests"),
+            settings,
+            stateDirectory,
             curseState: curseState);
 
         var result = await RunHostCommandAsync(host, "git");
 
         Assert.Equal(0, result.ExitCode);
-        Assert.Contains("A branch goblin approves", result.StdOut);
         Assert.Contains("git-ran", result.StdOut);
+        Assert.Contains("after-hook", result.StdOut);
+        Assert.Contains("A branch goblin approves", result.StdOut);
+        Assert.True(result.StdOut.IndexOf("git-ran", StringComparison.Ordinal) < result.StdOut.IndexOf("after-hook", StringComparison.Ordinal));
+        Assert.True(result.StdOut.IndexOf("after-hook", StringComparison.Ordinal) < result.StdOut.IndexOf("A branch goblin approves", StringComparison.Ordinal));
         Assert.Contains("A branch goblin approves", string.Join(Environment.NewLine, curseState.GetJournalLines()));
     }
 
@@ -286,10 +302,48 @@ public sealed class CurseModeTests
             Assert.True(string.IsNullOrWhiteSpace(stderr));
         }
 
+        Assert.Equal(0, curseState.AttemptedCommands);
+
         var blocked = await RunHostCommandAsync(host, "storm");
         Assert.Equal(1, blocked.ExitCode);
         Assert.DoesNotContain("storm-ran", blocked.StdOut);
         Assert.Contains("forgot to pray", blocked.StdErr, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(1, curseState.AttemptedCommands);
+    }
+
+    [Fact]
+    public async Task NextCommandGraceIsClearedAfterBlessingConsumesIt()
+    {
+        var curseState = new ShellCurseState(new SequenceCurseRandom(0, 0, 0, 0));
+        curseState.Enable();
+        curseState.TrySetFailureChance(5);
+        curseState.GrantNextCommandGrace(10);
+        curseState.AddBlessing(1, "test");
+
+        var parser = new CommandParser();
+        var registry = new CommandRegistry();
+        registry.RegisterBuiltIn(new ConstantCommand("storm", "storm-ran"));
+
+        var host = new ShellHost(
+            parser,
+            registry,
+            new ShellLifetime(),
+            new ProcessRunner(),
+            new ShellSettings(),
+            Path.Combine(Path.GetTempPath(), "ReaperShell.CurseModeTests"),
+            curseState: curseState);
+
+        var first = await RunHostCommandAsync(host, "storm");
+        Assert.Equal(0, first.ExitCode);
+        Assert.Contains("storm-ran", first.StdOut);
+        Assert.Equal(0, curseState.BlessingCharges);
+        Assert.Equal(0, curseState.NextCommandGraceChancePercent);
+
+        var second = await RunHostCommandAsync(host, "storm");
+        Assert.Equal(1, second.ExitCode);
+        Assert.DoesNotContain("storm-ran", second.StdOut);
+        Assert.Contains("forgot to pray", second.StdErr, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(2, curseState.AttemptedCommands);
     }
 
     [Fact]
@@ -393,7 +447,7 @@ public sealed class CurseModeTests
             IReadOnlyList<string> args,
             CancellationToken cancellationToken = default)
         {
-            var curse = context.Services.GetService<ICursedShell>();
+            var curse = context.Services?.GetService(typeof(ICursedShell)) as ICursedShell;
             if (curse?.IsEnabled == true)
             {
                 curse.AddAmbientEvent("The custom command leaves a strange smell in the heap.");
