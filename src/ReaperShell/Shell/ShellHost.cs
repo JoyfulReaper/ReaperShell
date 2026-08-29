@@ -1,7 +1,7 @@
-using System.Globalization;
-using System.Threading.Channels;
-using System.Text;
 using ReaperShell.Abstractions;
+using System.Globalization;
+using System.Text;
+using System.Threading.Channels;
 
 namespace ReaperShell.Shell;
 

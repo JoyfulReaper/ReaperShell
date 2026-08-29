@@ -14,7 +14,7 @@ public sealed class HistoryCommand : IShellCommand
 
     public string Name => "history";
 
-    public string Description => "Prints or clears commands from the current shell session.";
+    public string Description => "Prints or clears command history.";
 
     public Task<int> ExecuteAsync(
         ShellContext context,

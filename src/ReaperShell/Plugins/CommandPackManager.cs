@@ -1,7 +1,7 @@
-using System.Reflection;
-using System.Runtime.CompilerServices;
 using ReaperShell.Abstractions;
 using ReaperShell.Shell;
+using System.Reflection;
+using System.Runtime.CompilerServices;
 
 namespace ReaperShell.Plugins;
 

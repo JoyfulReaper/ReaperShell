@@ -40,7 +40,7 @@ internal static class Program
 
         var parser = new CommandParser();
         var registry = new CommandRegistry();
-        var sessionState = new ShellSessionState();
+        var sessionState = new ShellSessionState(Path.Combine(stateDirectory, "history"));
         var curseState = new ShellCurseState();
         var shellServices = new ShellServiceProvider().Add<ReaperShell.Abstractions.ICursedShell>(curseState);
         var processRunner = new ProcessRunner(sessionState);
