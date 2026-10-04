@@ -457,6 +457,11 @@ public sealed class ShellHost
                     innerOptions,
                     cancellationToken);
             }
+            catch (OperationCanceledException)
+            {
+                context.WriteErrorLine("Pipeline canceled.");
+                return 1;
+            }
             catch (Exception ex)
             {
                 context.WriteErrorLine($"Failed to open redirection target: {ex.Message}");
@@ -856,7 +861,7 @@ public sealed class ShellHost
 
                 try
                 {
-                    var standardInput = await context.Input.ReadToEndAsync();
+                    var standardInput = await context.Input.ReadToEndAsync(cancellationToken);
                     return (await _processRunner.RunAsync(
                         executablePath,
                         resolvedTokens.Skip(1).ToArray(),

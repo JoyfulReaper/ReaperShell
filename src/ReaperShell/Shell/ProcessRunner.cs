@@ -103,6 +103,7 @@ public sealed class ProcessRunner
             onStandardError?.Invoke(eventArgs.Data);
         };
 
+        cancellationToken.ThrowIfCancellationRequested();
         if (!process.Start())
         {
             throw new InvalidOperationException($"Failed to start process '{executable}'.");
@@ -111,18 +112,25 @@ public sealed class ProcessRunner
         process.BeginOutputReadLine();
         process.BeginErrorReadLine();
 
-        if (standardInput is not null)
-        {
-            await process.StandardInput.WriteAsync(standardInput);
-            await process.StandardInput.FlushAsync();
-            process.StandardInput.Close();
-        }
-
         try
         {
+            if (standardInput is not null)
+            {
+                try
+                {
+                    await process.StandardInput.WriteAsync(standardInput.AsMemory(), cancellationToken);
+                    await process.StandardInput.FlushAsync(cancellationToken);
+                    process.StandardInput.Close();
+                }
+                catch (IOException)
+                {
+                    // Consumers may exit before reading all input; preserve their actual exit code.
+                }
+            }
+
             await process.WaitForExitAsync(cancellationToken);
         }
-        catch (OperationCanceledException)
+        catch
         {
             if (!process.HasExited)
             {

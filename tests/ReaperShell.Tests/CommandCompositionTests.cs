@@ -18,12 +18,26 @@ public sealed class CommandCompositionParserTests
         Assert.Equal(["echo", "hello"], commandLine.Pipelines[0].Segments[0].Tokens);
     }
 
-    [Fact]
-    public void QuotedPipeDoesNotSplit()
+    [Theory]
+    [InlineData("echo \"a | b\"")]
+    [InlineData("echo 'a | b'")]
+    public void QuotedPipeDoesNotSplit(string input)
     {
-        Assert.True(_parser.TryParse("echo \"a | b\"", out var commandLine, out var error));
+        Assert.True(_parser.TryParse(input, out var commandLine, out var error));
         Assert.True(string.IsNullOrWhiteSpace(error));
+        Assert.True(commandLine!.IsSimpleCommand);
         Assert.Equal(["echo", "a | b"], commandLine!.Pipelines[0].Segments[0].Tokens);
+    }
+
+    [Fact]
+    public void AdjacentPipesSplitMultipleStages()
+    {
+        Assert.True(_parser.TryParse("echo 'a|b'|cat|grep \"a|b\"", out var commandLine, out var error), error);
+        var segments = Assert.Single(commandLine!.Pipelines).Segments;
+        Assert.Equal(3, segments.Count);
+        Assert.Equal(["echo", "a|b"], segments[0].Tokens);
+        Assert.Equal(["cat"], segments[1].Tokens);
+        Assert.Equal(["grep", "a|b"], segments[2].Tokens);
     }
 
     [Theory]
@@ -138,10 +152,13 @@ public sealed class CommandCompositionParserTests
         Assert.Equal(["echo", argument], commandLine.Pipelines[0].Segments[0].Tokens);
     }
 
-    [Fact]
-    public void EmptyPipelineSegmentFails()
+    [Theory]
+    [InlineData("echo hi |")]
+    [InlineData("| echo hi")]
+    [InlineData("echo hi | | cat")]
+    public void EmptyPipelineSegmentFails(string input)
     {
-        Assert.False(_parser.TryParse("echo hi |", out _, out var error));
+        Assert.False(_parser.TryParse(input, out _, out var error));
         Assert.Contains("Pipeline segment cannot be empty", error);
     }
 
@@ -387,6 +404,127 @@ public sealed class CommandCompositionExecutionTests
         Assert.Contains("stderr-oops", contents);
     }
 
+    [Theory]
+    [InlineData("echo 'a|b'|cat|grep \"a|b\"", "a|b")]
+    [InlineData("echo \"a|b\"|cat", "a|b")]
+    public async Task QuotedPipesRemainLiteralThroughExecution(string input, string expected)
+    {
+        using var temp = new TempDirectory();
+        var result = await RunAutomationAsync(temp.Directory, input);
+
+        Assert.Equal(0, result.ExitCode);
+        Assert.Equal(expected, result.StdOut);
+        Assert.Empty(result.StdErr);
+    }
+
+    [Theory]
+    [InlineData("chatty | cat", "stdout-hello", "stderr-oops", 0)]
+    [InlineData("stderr-only | cat", "", "boom", 0)]
+    [InlineData("failcmd | cat", "", "fail", 0)]
+    [InlineData("echo hello | failcmd", "", "fail", 7)]
+    public async Task PipelineKeepsStderrSeparateAndReturnsLastStageExitCode(
+        string input, string stdout, string stderr, int exitCode)
+    {
+        using var temp = new TempDirectory();
+        var result = await RunAutomationAsync(temp.Directory, input);
+
+        Assert.Equal(exitCode, result.ExitCode);
+        Assert.Equal(stdout, result.StdOut);
+        Assert.Equal(stderr, result.StdErr);
+    }
+
+    [Theory]
+    [InlineData("chatty >stage.txt 2>errors.txt | cat >>final.txt", "stdout-hello", "beforestdout-hello", "stderr-oops")]
+    [InlineData("chatty >>stage.txt | cat >final.txt 2>errors.txt", "beforestdout-hello", "stdout-hello", "")]
+    public async Task PipelineRedirectionPreservesExistingTeeBehaviorAndReleasesFiles(
+        string input, string stage, string final, string errors)
+    {
+        using var temp = new TempDirectory();
+        await File.WriteAllTextAsync(temp.GetPath("stage.txt"), "before");
+        await File.WriteAllTextAsync(temp.GetPath("final.txt"), "before");
+
+        var result = await RunAutomationAsync(temp.Directory, input);
+
+        Assert.Equal(0, result.ExitCode);
+        Assert.Empty(result.StdOut);
+        Assert.Equal(stage + Environment.NewLine, await File.ReadAllTextAsync(temp.GetPath("stage.txt")));
+        Assert.Equal(final + Environment.NewLine, await File.ReadAllTextAsync(temp.GetPath("final.txt")));
+        Assert.Equal(errors.Length == 0 ? "" : errors + Environment.NewLine, await File.ReadAllTextAsync(temp.GetPath("errors.txt")));
+        Assert.Equal(errors.Length == 0 ? "stderr-oops" : "", result.StdErr);
+        AssertFileReleased(temp.GetPath("stage.txt"));
+        AssertFileReleased(temp.GetPath("final.txt"));
+        AssertFileReleased(temp.GetPath("errors.txt"));
+    }
+
+    [Fact]
+    public async Task CanceledPipelineDoesNotExecuteLaterStagesOrOpenTheirTargets()
+    {
+        using var temp = new TempDirectory();
+        using var cancellation = new CancellationTokenSource();
+        var host = CreateHost(temp.Directory, new ShellSessionState(), null, new CancelCommand(cancellation));
+        var context = CreateContext(temp.Directory);
+
+        var result = await host.RunAutomationCommandAsync(context,
+            "cancel >stage.txt | echo should-not-run >later.txt", false, cancellation.Token);
+
+        Assert.Equal(1, result);
+        Assert.False(File.Exists(temp.GetPath("later.txt")));
+        Assert.Contains("Pipeline canceled", Normalize(context.Error));
+        Assert.DoesNotContain("Failed to open", Normalize(context.Error));
+        AssertFileReleased(temp.GetPath("stage.txt"));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task PipelineOwnsIntermediateStreamsButNotCallerStreams(bool fail)
+    {
+        using var temp = new TempDirectory();
+        var context = new ShellContext(new StringWriter(), new StringWriter(), new StringReader("original"),
+            temp.Directory, null, CancellationToken.None);
+        Assert.True(new ShellCommandLineParser().TryParse("producer | consumer", out var commandLine, out _));
+        TextWriter? capturedOutput = null;
+        TextReader? intermediateInput = null;
+        async Task<int> Execute(ShellContext stage, IReadOnlyList<string> tokens, CommandExecutionOptions options, CancellationToken token)
+        {
+            if (tokens[0] == "producer")
+            {
+                capturedOutput = stage.Out;
+                Assert.Same(context.Input, stage.Input);
+                stage.Out.Write("payload");
+                return 0;
+            }
+
+            intermediateInput = stage.Input;
+            Assert.Equal("payload", await stage.Input.ReadToEndAsync(token));
+            Assert.Same(context.Out, stage.Out);
+            Assert.Same(context.Error, stage.Error);
+            if (fail)
+            {
+                throw new InvalidOperationException("consumer failed");
+            }
+
+            return 0;
+        }
+
+        var execution = new CommandLineExecutor().ExecuteAsync(context, commandLine!, Execute,
+            new CommandExecutionOptions(false, false), CancellationToken.None);
+        if (fail)
+        {
+            await Assert.ThrowsAsync<InvalidOperationException>(() => execution);
+        }
+        else
+        {
+            Assert.Equal(0, await execution);
+        }
+
+        Assert.Throws<ObjectDisposedException>(() => capturedOutput!.Write('x'));
+        Assert.Throws<ObjectDisposedException>(() => intermediateInput!.Read());
+        Assert.Equal("original", context.Input.ReadToEnd());
+        context.Out.Write("still open");
+        context.Error.Write("still open");
+    }
+
     [Fact]
     public async Task PipelineFeedsStdoutToNextCommand()
     {
@@ -572,6 +710,18 @@ public sealed class CommandCompositionExecutionTests
             catch
             {
             }
+        }
+    }
+
+    private sealed class CancelCommand(CancellationTokenSource cancellation) : IShellCommand
+    {
+        public string Name => "cancel";
+        public string Description => "Cancels the active pipeline.";
+
+        public Task<int> ExecuteAsync(ShellContext context, IReadOnlyList<string> args, CancellationToken cancellationToken = default)
+        {
+            cancellation.Cancel();
+            return Task.FromResult(0);
         }
     }
 

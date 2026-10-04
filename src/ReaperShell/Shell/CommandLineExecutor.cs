@@ -53,6 +53,8 @@ public sealed class CommandLineExecutor
 
         for (var segmentIndex = 0; segmentIndex < pipeline.Segments.Count; segmentIndex++)
         {
+            using var ownedInput = ReferenceEquals(currentInput, context.Input) ? null : currentInput;
+            cancellationToken.ThrowIfCancellationRequested();
             var segment = pipeline.Segments[segmentIndex];
             var isLastSegment = segmentIndex == pipeline.Segments.Count - 1;
             var captureStdout = !isLastSegment;
@@ -63,6 +65,8 @@ public sealed class CommandLineExecutor
                 segment.Tokens,
                 segmentOptions,
                 cancellationToken);
+
+            cancellationToken.ThrowIfCancellationRequested();
 
             currentInput = captureStdout
                 ? new StringReader(segmentResources.CapturedStdout?.ToString() ?? string.Empty)
@@ -104,12 +108,6 @@ public sealed class CommandLineExecutor
         bool isLastSegment,
         List<IDisposable> disposables)
     {
-        if (currentInput is IDisposable disposableInput &&
-            !ReferenceEquals(currentInput, parentContext.Input))
-        {
-            disposables.Add(disposableInput);
-        }
-
         var stdoutRedirection = segment.Redirections.FirstOrDefault(redirection =>
             redirection.Kind is CommandRedirectionKind.StdoutOverwrite or
                 CommandRedirectionKind.StdoutAppend or

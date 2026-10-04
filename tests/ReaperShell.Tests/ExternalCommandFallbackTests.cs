@@ -41,6 +41,47 @@ public sealed class ExternalCommandFallbackTests : IAsyncLifetime
             """
 using System.Text.Json;
 
+if (args[0] == "--pipe-emit")
+{
+    Console.Out.WriteLine("alpha");
+    Console.Out.WriteLine("beta");
+    Console.Error.WriteLine("PIPE_STDERR");
+    return 17;
+}
+
+if (args[0] == "--pipe-upper")
+{
+    Console.Out.Write((await Console.In.ReadToEndAsync()).ToUpperInvariant());
+    Console.Error.WriteLine("PIPE_STDERR");
+    return 0;
+}
+
+if (args[0] == "--pipe-first")
+{
+    Console.Out.WriteLine("early exit");
+    return 23;
+}
+
+if (args[0] == "--pipe-pressure")
+{
+    Console.Out.WriteLine(new string('o', 256 * 1024));
+    Console.Error.WriteLine(new string('e', 256 * 1024));
+    Console.Out.WriteLine((await Console.In.ReadToEndAsync()).Length);
+    return 0;
+}
+
+if (args[0] is "--pipe-block" or "--pipe-wait")
+{
+    if (args[0] == "--pipe-wait")
+    {
+        await Console.In.ReadToEndAsync();
+    }
+
+    Console.Error.WriteLine($"READY:{Environment.ProcessId}");
+    await Task.Delay(TimeSpan.FromSeconds(30));
+    return 0;
+}
+
 var resultPath = args[0];
 var payload = new
 {
@@ -330,6 +371,120 @@ return 17;
         }
     }
 
+    [Theory]
+    [InlineData("echo hello | fixture-command --pipe-upper", "HELLO", 1)]
+    [InlineData("plugin-producer | fixture-command --pipe-upper", "PLUGIN", 1)]
+    [InlineData("fixture-command --pipe-emit | cat", "alpha\nbeta", 1)]
+    [InlineData("fixture-command --pipe-emit | plugin-consumer", "alpha\nbeta", 1)]
+    [InlineData("fixture-command --pipe-emit | fixture-command --pipe-upper", "ALPHA\nBETA", 2)]
+    [InlineData("echo hello | fixture-command --pipe-upper | cat", "HELLO", 1)]
+    public async Task PipelinesConnectBuiltInsPluginsAndExternalCommands(string input, string expected, int errorLines)
+    {
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+        var result = await RunPipelineAsync(input, timeout.Token);
+
+        Assert.Equal(0, result.ExitCode);
+        Assert.Equal(expected, result.StdOut.Replace("\r\n", "\n").TrimEnd('\n'));
+        Assert.Equal(string.Concat(Enumerable.Repeat("PIPE_STDERR" + Environment.NewLine, errorLines)), result.StdErr);
+    }
+
+    [Fact]
+    public async Task ExternalConsumerMayExitBeforeReadingAllPipelineInput()
+    {
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+        var result = await RunPipelineAsync("big-input | fixture-command --pipe-first", timeout.Token);
+
+        Assert.Equal(23, result.ExitCode);
+        Assert.Equal("early exit" + Environment.NewLine, result.StdOut);
+        Assert.Empty(result.StdErr);
+    }
+
+    [Fact]
+    public async Task ExternalOutputIsDrainedWhileWritingLargePipelineInput()
+    {
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+        var result = await RunPipelineAsync("big-input | fixture-command --pipe-pressure | plugin-consumer", timeout.Token);
+
+        Assert.Equal(0, result.ExitCode);
+        Assert.Equal(new string('o', 256 * 1024) + Environment.NewLine +
+            (1024 * 1024 + Environment.NewLine.Length) + Environment.NewLine, result.StdOut);
+        Assert.Equal(new string('e', 256 * 1024) + Environment.NewLine, result.StdErr);
+    }
+
+    [Theory]
+    [InlineData("--pipe-block")]
+    [InlineData("--pipe-wait")]
+    public async Task PipelineCancellationStopsExternalProcessAndSkipsLaterStages(string mode)
+    {
+        var originalPath = Environment.GetEnvironmentVariable("PATH");
+        using var cancellation = new CancellationTokenSource();
+        using var stderr = new ReadyWriter();
+        Process? child = null;
+        Task<int>? execution = null;
+        try
+        {
+            Environment.SetEnvironmentVariable("PATH", Path.GetDirectoryName(_helperExecutablePath) + Path.PathSeparator + originalPath);
+            var registry = CreatePipelineRegistry();
+            var host = new ShellHost(new CommandParser(), registry, new ShellLifetime(), new ProcessRunner(),
+                new ShellSettings { ExternalCommandMode = ExternalCommandMode.PathOnly }, _helperRoot);
+            var context = new ShellContext(new StringWriter(), stderr, new DirectoryInfo(_helperRoot), null, cancellation.Token);
+            execution = host.RunAutomationCommandAsync(context,
+                $"big-input | fixture-command {mode} | echo should-not-run >later.txt", false, cancellation.Token);
+            var pid = await stderr.Ready.Task.WaitAsync(TimeSpan.FromSeconds(15));
+            child = Process.GetProcessById(pid);
+
+            cancellation.Cancel();
+
+            Assert.Equal(1, await execution.WaitAsync(TimeSpan.FromSeconds(10)));
+            Assert.True(child.HasExited);
+            Assert.False(File.Exists(Path.Combine(_helperRoot, "later.txt")));
+            Assert.Contains("Pipeline canceled", stderr.ToString());
+        }
+        finally
+        {
+            cancellation.Cancel();
+            Environment.SetEnvironmentVariable("PATH", originalPath);
+            if (child is not null && !child.HasExited)
+            {
+                child.Kill(entireProcessTree: true);
+                await child.WaitForExitAsync();
+            }
+
+            child?.Dispose();
+            if (execution is not null)
+            {
+                await execution.WaitAsync(TimeSpan.FromSeconds(10));
+            }
+        }
+    }
+
+    private async Task<(int ExitCode, string StdOut, string StdErr)> RunPipelineAsync(string input, CancellationToken cancellationToken)
+    {
+        var originalPath = Environment.GetEnvironmentVariable("PATH");
+        try
+        {
+            Environment.SetEnvironmentVariable("PATH", Path.GetDirectoryName(_helperExecutablePath) + Path.PathSeparator + originalPath);
+            return await ExecuteCommandAsync(input,
+                new ShellSettings { ExternalCommandMode = ExternalCommandMode.PathOnly },
+                CreatePipelineRegistry(), [], cancellationToken: cancellationToken);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("PATH", originalPath);
+        }
+    }
+
+    private CommandRegistry CreatePipelineRegistry()
+    {
+        var registry = new CommandRegistry();
+        registry.RegisterBuiltIn(new EchoCommand());
+        registry.RegisterBuiltIn(new CatCommand());
+        registry.RegisterPlugin(new ConstantCommand("plugin-producer", "plugin"), "test-pack", _helperRoot);
+        registry.RegisterPlugin(new InputCommand(), "test-pack", _helperRoot);
+        registry.RegisterPlugin(new ConstantCommand("big-input", new string('x', 1024 * 1024)), "test-pack", _helperRoot);
+        return registry;
+    }
+
     private async Task<(int ExitCode, string StdOut, string StdErr)> RunBuiltInCommandAsync(
         IShellCommand command,
         params string[] args)
@@ -365,7 +520,8 @@ return 17;
         ShellSettings settings,
         CommandRegistry registry,
         IReadOnlyList<string> commandArgs,
-        string? workingDirectory = null)
+        string? workingDirectory = null,
+        CancellationToken cancellationToken = default)
     {
         var parser = new CommandParser();
         var host = new ShellHost(parser, registry, new ShellLifetime(), new ProcessRunner(), settings, _helperRoot);
@@ -376,13 +532,13 @@ return 17;
             stderr,
             new DirectoryInfo(workingDirectory ?? _helperRoot),
             services: null,
-            CancellationToken.None);
+            cancellationToken);
 
         var commandText = commandArgs.Count == 0
             ? commandName
             : commandName + " " + string.Join(" ", commandArgs.Select(QuoteIfNeeded));
 
-        var exitCode = await host.RunAutomationCommandAsync(context, commandText, echoCommand: false, CancellationToken.None);
+        var exitCode = await host.RunAutomationCommandAsync(context, commandText, echoCommand: false, cancellationToken);
         return (exitCode, stdout.ToString(), stderr.ToString());
     }
 
@@ -415,6 +571,32 @@ return 17;
         if (process.ExitCode != 0)
         {
             throw new InvalidOperationException($"'{fileName}' exited with {process.ExitCode}.");
+        }
+    }
+
+    private sealed class ReadyWriter : StringWriter
+    {
+        public TaskCompletionSource<int> Ready { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public override void WriteLine(string? value)
+        {
+            base.WriteLine(value);
+            if (value is not null && value.StartsWith("READY:", StringComparison.Ordinal))
+            {
+                Ready.TrySetResult(int.Parse(value[6..]));
+            }
+        }
+    }
+
+    private sealed class InputCommand : IShellCommand
+    {
+        public string Name => "plugin-consumer";
+        public string Description => "Copies pipeline input.";
+
+        public async Task<int> ExecuteAsync(ShellContext context, IReadOnlyList<string> args, CancellationToken cancellationToken = default)
+        {
+            await context.Out.WriteAsync(await context.Input.ReadToEndAsync(cancellationToken));
+            return 0;
         }
     }
 

@@ -102,6 +102,41 @@ rsh> repo load sample
 rsh> hello
 ```
 
+## Basic Pipes
+
+Use `|` to pass a command's stdout to the next command's input:
+
+```text
+echo hello | grep hell
+cat app.log | grep error | head -n 1
+echo "a|b"|cat
+```
+
+Pipes work between built-ins, plugins that read `ShellContext.Input`, and external
+commands when PATH fallback is enabled. Single- and double-quoted `|` characters
+are literal text; spaces around an unquoted `|` are optional. Stderr stays separate
+and is never implicitly fed to the next stage.
+
+Stages run sequentially. Each stage's stdout is buffered in a `StringWriter`, then
+passed to the next stage as a `StringReader`. The pipeline returns the last stage's
+exit code, even if an earlier stage failed; there is no `pipefail` mode. Cancellation
+stops later stages, cancels external stdin writes, and terminates the active external
+process tree; a canceled pipeline returns exit code 1. In-process commands must
+cooperate with cancellation.
+
+Redirection applies per stage. For example, `echo hello | cat > out.txt` saves the
+final output. ReaperShell's existing `echo hello > copy.txt | cat` behavior writes
+stdout to both the file and the next stage; `>>` does the same while appending.
+`2>` redirects only that stage's stderr.
+
+These are buffered text pipes, not concurrent OS pipes. There is no buffer size
+limit or disk spill, so large output can consume substantial memory, and an endless
+producer prevents later stages from starting. External stdout/stderr are drained
+asynchronously while stdin is written, but output is also retained in memory and
+forwarded line by line, normalizing line endings. Binary data and interactive or
+infinite-stream pipelines are not supported. No platform shell is invoked, and
+`|&`, job control, background execution, and process substitution are unsupported.
+
 ## Built-In Commands
 
 The commands below are currently registered by the shell. Syntax is kept close to the code so it matches the actual parser behavior.
