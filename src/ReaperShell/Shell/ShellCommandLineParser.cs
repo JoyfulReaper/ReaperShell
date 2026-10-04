@@ -140,7 +140,7 @@ public sealed class ShellCommandLineParser
         }
 
         var targetToken = tokens[index + 1];
-        if (targetToken.Kind != ShellCommandLineTokenKind.Word)
+        if (targetToken.Kind != ShellCommandLineTokenKind.Word || targetToken.Value.Length == 0)
         {
             errorMessage = $"Missing redirection target after '{tokens[index].Value}'.";
             return false;
@@ -177,6 +177,7 @@ public sealed class ShellCommandLineParser
         errorMessage = string.Empty;
         var current = new StringBuilder();
         var quote = '\0';
+        var wordStarted = false;
 
         for (var index = 0; index < input.Length; index++)
         {
@@ -208,11 +209,12 @@ public sealed class ShellCommandLineParser
 
             if (character is '"' or '\'')
             {
+                wordStarted = true;
                 quote = character;
                 continue;
             }
 
-            if (TryReadOperator(input, index, out var operatorText, out var consumed, out var invalidOperator))
+            if (TryReadOperator(input, index, !wordStarted, out var operatorText, out var consumed, out var invalidOperator))
             {
                 FlushWord();
                 if (invalidOperator is not null)
@@ -233,6 +235,7 @@ public sealed class ShellCommandLineParser
                 return false;
             }
 
+            wordStarted = true;
             current.Append(character);
         }
 
@@ -247,19 +250,29 @@ public sealed class ShellCommandLineParser
 
         void FlushWord()
         {
-            if (current.Length == 0)
+            if (!wordStarted)
             {
                 return;
             }
 
-            tokenList.Add(new ShellCommandLineToken(ShellCommandLineTokenKind.Word, current.ToString()));
+            // Retain an empty quoted target for validation without changing ordinary argument tokenization.
+            var followsRedirection = tokenList.Count > 0 &&
+                tokenList[^1].Kind == ShellCommandLineTokenKind.Operator &&
+                RedirectionOperators.Contains(tokenList[^1].Value);
+            if (current.Length > 0 || followsRedirection)
+            {
+                tokenList.Add(new ShellCommandLineToken(ShellCommandLineTokenKind.Word, current.ToString()));
+            }
+
             current.Clear();
+            wordStarted = false;
         }
     }
 
     private static bool TryReadOperator(
         string input,
         int index,
+        bool atWordStart,
         out string operatorText,
         out int consumed,
         out string? invalidOperator)
@@ -328,7 +341,7 @@ public sealed class ShellCommandLineParser
                 return false;
 
             case '2':
-                if (index + 1 < input.Length && input[index + 1] == '>')
+                if (atWordStart && index + 1 < input.Length && input[index + 1] == '>')
                 {
                     if (index + 2 < input.Length && input[index + 2] == '>')
                     {

@@ -175,6 +175,42 @@ return 17;
         }
     }
 
+    [Theory]
+    [InlineData(">", "EXTERNAL_STDOUT", "", "EXTERNAL_STDERR")]
+    [InlineData("2>", "EXTERNAL_STDERR", "EXTERNAL_STDOUT", "")]
+    public async Task ExternalRedirectionPreservesArgumentsStreamsAndExitCode(
+        string operation, string fileContent, string expectedStdout, string expectedStderr)
+    {
+        var resultFile = Path.Combine(_helperRoot, "result.json");
+        var outputPath = Path.Combine(_helperRoot, "output.txt");
+        var originalPath = Environment.GetEnvironmentVariable("PATH");
+        (int exitCode, string stdout, string stderr) result;
+        try
+        {
+            Environment.SetEnvironmentVariable("PATH", Path.GetDirectoryName(_helperExecutablePath) + Path.PathSeparator + originalPath);
+            result = await RunShellCommandAsync(
+                $"fixture-command \"{resultFile}\" first {operation}output.txt",
+                new ShellSettings { ExternalCommandMode = ExternalCommandMode.PathOnly },
+                registry: null);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("PATH", originalPath);
+        }
+
+        Assert.Equal(17, result.exitCode);
+        Assert.Equal(expectedStdout, result.stdout.TrimEnd('\r', '\n'));
+        Assert.Equal(expectedStderr, result.stderr.TrimEnd('\r', '\n'));
+        Assert.Equal(fileContent + Environment.NewLine, await File.ReadAllTextAsync(outputPath));
+        using var payload = JsonDocument.Parse(await File.ReadAllTextAsync(resultFile));
+        Assert.Equal(new[] { "first" }, payload.RootElement.GetProperty("args").EnumerateArray().Select(element => element.GetString()).ToArray());
+        using (File.Open(outputPath, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
+        {
+        }
+
+        File.Delete(outputPath);
+    }
+
     [Fact]
     public async Task PathOnlyReportsUnknownCommandWhenExecutableIsMissing()
     {

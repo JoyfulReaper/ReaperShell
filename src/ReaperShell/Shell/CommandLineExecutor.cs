@@ -80,6 +80,30 @@ public sealed class CommandLineExecutor
         bool isLastSegment)
     {
         var disposables = new List<IDisposable>();
+        try
+        {
+            return CreateSegmentResources(parentContext, segment, currentInput, captureStdout, isLastSegment, disposables);
+        }
+        catch
+        {
+            // A later target may fail after an earlier file has already been opened.
+            foreach (var disposable in disposables)
+            {
+                disposable.Dispose();
+            }
+
+            throw;
+        }
+    }
+
+    private static SegmentResources CreateSegmentResources(
+        ShellContext parentContext,
+        CommandSegment segment,
+        TextReader currentInput,
+        bool captureStdout,
+        bool isLastSegment,
+        List<IDisposable> disposables)
+    {
         if (currentInput is IDisposable disposableInput &&
             !ReferenceEquals(currentInput, parentContext.Input))
         {
