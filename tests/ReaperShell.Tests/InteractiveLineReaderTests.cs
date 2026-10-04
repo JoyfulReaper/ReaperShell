@@ -176,6 +176,97 @@ public sealed class InteractiveLineReaderTests
         Assert.Equal("from-redirect", line);
     }
 
+    [Theory]
+    [InlineData(ConsoleKey.A, "Xone two", 1)]
+    [InlineData(ConsoleKey.E, "one twoX", 8)]
+    [InlineData(ConsoleKey.K, "one twX", 7)]
+    [InlineData(ConsoleKey.U, "Xo", 1)]
+    [InlineData(ConsoleKey.W, "one Xo", 5)]
+    [InlineData(ConsoleKey.L, "one twXo", 7)]
+    public async Task ControlShortcutsEditAtCursor(ConsoleKey key, string expected, int cursor)
+    {
+        var console = new ScriptedInteractiveConsole(
+            Keys("one two", includeEnter: false).Concat([
+                ConsoleKeyInfoFor(ConsoleKey.LeftArrow, '\0'),
+                ControlKey(key),
+                ToKey('X'),
+                ConsoleKeyInfoFor(ConsoleKey.Enter, '\r')]));
+
+        Assert.Equal(expected, await ReadLine(console));
+        Assert.Equal(5 + cursor, console.LastSetCursorLeft);
+    }
+
+    [Theory]
+    [InlineData(ConsoleKey.A, "one two")]
+    [InlineData(ConsoleKey.E, "one two")]
+    [InlineData(ConsoleKey.K, "one two")]
+    [InlineData(ConsoleKey.U, "")]
+    [InlineData(ConsoleKey.W, "one ")]
+    [InlineData(ConsoleKey.L, "one two")]
+    public async Task ControlShortcutsExitHistoryNavigation(ConsoleKey key, string expected)
+    {
+        var console = new ScriptedInteractiveConsole([
+            ConsoleKeyInfoFor(ConsoleKey.UpArrow, '\0'),
+            ControlKey(key),
+            ConsoleKeyInfoFor(ConsoleKey.DownArrow, '\0'),
+            ConsoleKeyInfoFor(ConsoleKey.Enter, '\r')]);
+
+        Assert.Equal(expected, await ReadLine(console));
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData(typeof(IOException))]
+    [InlineData(typeof(InvalidOperationException))]
+    [InlineData(typeof(PlatformNotSupportedException))]
+    public async Task ControlLRedrawsAndPreservesInputWhenClearIsUnavailable(Type? errorType)
+    {
+        var console = new ScriptedInteractiveConsole(
+            Keys("abc", includeEnter: false).Concat([
+                ConsoleKeyInfoFor(ConsoleKey.LeftArrow, '\0'),
+                ControlKey(ConsoleKey.L),
+                ConsoleKeyInfoFor(ConsoleKey.Enter, '\r')]))
+        {
+            ClearException = errorType is null ? null : (Exception)Activator.CreateInstance(errorType)!
+        };
+        console.WriteLine("old output");
+
+        Assert.Equal("abc", await ReadLine(console));
+        Assert.Equal(1, console.ClearCount);
+        Assert.Equal(7, console.LastSetCursorLeft);
+        Assert.Equal(errorType is null ? 0 : 1, console.LastSetCursorTop);
+        Assert.EndsWith("\rrsh> abc" + Environment.NewLine, console.Output);
+    }
+
+    [Theory]
+    [InlineData(ConsoleKey.C, "abc", "")]
+    [InlineData(ConsoleKey.D, "abc", "abc")]
+    [InlineData(ConsoleKey.D, "", null)]
+    public async Task ExistingControlShortcutsKeepTheirBehavior(ConsoleKey key, string input, string? expected)
+    {
+        var console = new ScriptedInteractiveConsole(
+            Keys(input, includeEnter: false).Concat([
+                ControlKey(key), ConsoleKeyInfoFor(ConsoleKey.Enter, '\r')]));
+
+        Assert.Equal(expected, await ReadLine(console));
+        Assert.False(console.TreatControlCAsInput);
+    }
+
+    private static Task<string?> ReadLine(ScriptedInteractiveConsole console)
+    {
+        return new InteractiveLineReader(console).ReadLineAsync(
+            "rsh> ",
+            () => new DirectoryInfo(Path.GetTempPath()),
+            () => new[] { "one two" },
+            () => [],
+            () => []);
+    }
+
+    private static ConsoleKeyInfo ControlKey(ConsoleKey key)
+    {
+        return new ConsoleKeyInfo((char)((int)key - (int)ConsoleKey.A + 1), key, shift: false, alt: false, control: true);
+    }
+
     private static IEnumerable<ConsoleKeyInfo> Keys(string text, bool includeEnter)
     {
         foreach (var character in text)
@@ -268,6 +359,22 @@ public sealed class InteractiveLineReaderTests
         public string Output { get; private set; } = string.Empty;
 
         public string? RedirectedLine { get; }
+
+        public int ClearCount { get; private set; }
+
+        public Exception? ClearException { get; init; }
+
+        public void Clear()
+        {
+            ClearCount++;
+            if (ClearException is not null)
+            {
+                throw ClearException;
+            }
+
+            CursorLeft = 0;
+            CursorTop = 0;
+        }
 
         public ConsoleKeyInfo ReadKey(bool intercept)
         {

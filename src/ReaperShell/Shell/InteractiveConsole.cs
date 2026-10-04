@@ -18,6 +18,8 @@ internal interface IInteractiveConsole
 
     string? ReadLine();
 
+    void Clear();
+
     void SetCursorPosition(int left, int top);
 
     void Write(string value);
@@ -57,6 +59,11 @@ internal sealed class SystemInteractiveConsole : IInteractiveConsole
     public string? ReadLine()
     {
         return Console.ReadLine();
+    }
+
+    public void Clear()
+    {
+        Console.Clear();
     }
 
     public void SetCursorPosition(int left, int top)

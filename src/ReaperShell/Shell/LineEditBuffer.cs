@@ -85,6 +85,52 @@ internal sealed class LineEditBuffer
         return true;
     }
 
+    public bool DeleteToEnd()
+    {
+        if (CursorIndex == _buffer.Length)
+        {
+            return false;
+        }
+
+        _buffer.Remove(CursorIndex, _buffer.Length - CursorIndex);
+        return true;
+    }
+
+    public bool DeleteToStart()
+    {
+        if (CursorIndex == 0)
+        {
+            return false;
+        }
+
+        _buffer.Remove(0, CursorIndex);
+        CursorIndex = 0;
+        return true;
+    }
+
+    public bool DeletePreviousWord()
+    {
+        var start = CursorIndex;
+        while (start > 0 && char.IsWhiteSpace(_buffer[start - 1]))
+        {
+            start--;
+        }
+
+        while (start > 0 && !char.IsWhiteSpace(_buffer[start - 1]))
+        {
+            start--;
+        }
+
+        if (start == CursorIndex)
+        {
+            return false;
+        }
+
+        _buffer.Remove(start, CursorIndex - start);
+        CursorIndex = start;
+        return true;
+    }
+
     public void Replace(string text)
     {
         _buffer.Clear();

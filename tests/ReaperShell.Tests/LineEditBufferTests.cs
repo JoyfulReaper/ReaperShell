@@ -95,6 +95,66 @@ public sealed class LineEditBufferTests
         Assert.Equal(buffer.Text.Length, buffer.CursorIndex);
     }
 
+    [Theory]
+    [InlineData("abc", 1, "a", true)]
+    [InlineData("abc", 0, "", true)]
+    [InlineData("abc", 3, "abc", false)]
+    [InlineData("", 0, "", false)]
+    public void DeleteToEndPreservesCursor(string text, int cursor, string expected, bool changed)
+    {
+        var buffer = CreateBuffer(text);
+        while (buffer.CursorIndex > cursor)
+        {
+            buffer.MoveLeft();
+        }
+
+        Assert.Equal(changed, buffer.DeleteToEnd());
+        Assert.Equal(expected, buffer.Text);
+        Assert.Equal(cursor, buffer.CursorIndex);
+    }
+
+    [Theory]
+    [InlineData("abc", 1, "bc", true)]
+    [InlineData("abc", 3, "", true)]
+    [InlineData("abc", 0, "abc", false)]
+    [InlineData("", 0, "", false)]
+    public void DeleteToStartPreservesSuffix(string text, int cursor, string expected, bool changed)
+    {
+        var buffer = CreateBuffer(text);
+        while (buffer.CursorIndex > cursor)
+        {
+            buffer.MoveLeft();
+        }
+
+        Assert.Equal(changed, buffer.DeleteToStart());
+        Assert.Equal(expected, buffer.Text);
+        Assert.Equal(0, buffer.CursorIndex);
+    }
+
+    [Theory]
+    [InlineData("one two", 7, "one ", 4)]
+    [InlineData("one   two", 9, "one   ", 6)]
+    [InlineData("one   two", 6, "two", 0)]
+    [InlineData("one two   ", 10, "one ", 4)]
+    [InlineData("one two three", 6, "one o three", 4)]
+    [InlineData("one two", 0, "one two", 0)]
+    [InlineData("   ", 3, "", 0)]
+    [InlineData("one\t two\t ", 10, "one\t ", 5)]
+    [InlineData("one 'two-three'", 15, "one ", 4)]
+    [InlineData("", 0, "", 0)]
+    public void DeletePreviousWordUsesWhitespaceBoundaries(string text, int cursor, string expected, int expectedCursor)
+    {
+        var buffer = CreateBuffer(text);
+        while (buffer.CursorIndex > cursor)
+        {
+            buffer.MoveLeft();
+        }
+
+        Assert.Equal(cursor > 0, buffer.DeletePreviousWord());
+        Assert.Equal(expected, buffer.Text);
+        Assert.Equal(expectedCursor, buffer.CursorIndex);
+    }
+
     private static LineEditBuffer CreateBuffer(string text)
     {
         var buffer = new LineEditBuffer();

@@ -239,6 +239,42 @@ internal sealed class InteractiveLineReader
             return LineKeyAction.None;
         }
 
+        if (key.Modifiers.HasFlag(ConsoleModifiers.Control) &&
+            key.Key is ConsoleKey.K or ConsoleKey.U or ConsoleKey.W or ConsoleKey.L)
+        {
+            ExitHistoryNavigation(buffer, ref historySnapshot, ref historyIndex, ref draftBeforeHistoryNavigation);
+            if (key.Key == ConsoleKey.L)
+            {
+                try
+                {
+                    _console.Clear();
+                    _previousRenderLength = 0;
+                }
+                catch (Exception exception) when (exception is IOException or InvalidOperationException or PlatformNotSupportedException)
+                {
+                    // Keep the previous length so a failed clear still erases stale input.
+                }
+
+                RenderLine(prompt, buffer);
+                return LineKeyAction.Render;
+            }
+
+            var changed = key.Key switch
+            {
+                ConsoleKey.K => buffer.DeleteToEnd(),
+                ConsoleKey.U => buffer.DeleteToStart(),
+                ConsoleKey.W => buffer.DeletePreviousWord(),
+                _ => false
+            };
+            if (changed)
+            {
+                RenderLine(prompt, buffer);
+                return LineKeyAction.Render;
+            }
+
+            return LineKeyAction.None;
+        }
+
         if (IsEnterKey(key))
         {
             _console.WriteLine();
@@ -333,7 +369,8 @@ internal sealed class InteractiveLineReader
             return LineKeyAction.None;
         }
 
-        if (key.Key == ConsoleKey.Home)
+        if (key.Key == ConsoleKey.Home ||
+            (key.Modifiers.HasFlag(ConsoleModifiers.Control) && key.Key == ConsoleKey.A))
         {
             ExitHistoryNavigation(buffer, ref historySnapshot, ref historyIndex, ref draftBeforeHistoryNavigation);
             if (buffer.MoveHome())
@@ -345,7 +382,8 @@ internal sealed class InteractiveLineReader
             return LineKeyAction.None;
         }
 
-        if (key.Key == ConsoleKey.End)
+        if (key.Key == ConsoleKey.End ||
+            (key.Modifiers.HasFlag(ConsoleModifiers.Control) && key.Key == ConsoleKey.E))
         {
             ExitHistoryNavigation(buffer, ref historySnapshot, ref historyIndex, ref draftBeforeHistoryNavigation);
             if (buffer.MoveEnd())
