@@ -7,6 +7,59 @@ namespace ReaperShell.Tests;
 
 public sealed class ScriptVariableExpansionTests
 {
+    [Fact]
+    public async Task UserCommandsExposePreviousResultWithoutChangingScriptOrAutomationState()
+    {
+        using var harness = ScriptTestHarness.Create();
+        Assert.Equal("0", (await harness.RunUserAsync("echo $?")).StdOut.Trim());
+        await harness.RunUserAsync("failcmd");
+        await harness.RunAutomationAsync("echo internal");
+        Assert.Equal("1", (await harness.RunUserAsync("echo ${?}")).StdOut.Trim());
+        Assert.Equal("0", (await harness.RunUserAsync("echo $?")).StdOut.Trim());
+        await harness.RunUserAsync("unknown-command-for-status-test");
+        Assert.Equal("1", (await harness.RunUserAsync("echo $?")).StdOut.Trim());
+        await harness.RunUserAsync("echo | ");
+        Assert.Equal("1", (await harness.RunUserAsync("echo $?")).StdOut.Trim());
+        Assert.Equal("$$? cost:$? $name", (await harness.RunUserAsync("echo $$? cost:$? $name")).StdOut.Trim());
+        Assert.Equal("0", (await harness.RunUserAsync("echo \"$?\"")).StdOut.Trim());
+    }
+
+    [Theory]
+    [InlineData("failcmd | echo ok", "0")]
+    [InlineData("echo ok | failcmd", "1")]
+    [InlineData("failcmd || echo recovered", "0")]
+    [InlineData("failcmd && echo skipped", "1")]
+    public async Task UserStatusUsesFinalPipelineOrChainResult(string command, string expected)
+    {
+        using var harness = ScriptTestHarness.Create();
+        await harness.RunUserAsync(command);
+        Assert.Equal(expected, (await harness.RunUserAsync("echo $?")).StdOut.Trim());
+    }
+
+    [Fact]
+    public async Task HooksAndNestedRitualsDoNotOverwriteUserOrScriptStatus()
+    {
+        using var harness = ScriptTestHarness.Create();
+        await File.WriteAllTextAsync(Path.Combine(harness.StateDirectory, "rituals", "hook.rsh"), "failcmd\n");
+        await File.WriteAllTextAsync(Path.Combine(harness.StateDirectory, "rituals", "inner.rsh"), "failcmd\necho inner:$?\n");
+        harness.AddAfterCommandHook("hook");
+        await harness.RunUserAsync("failcmd");
+        Assert.Contains("1", (await harness.RunUserAsync("echo $?")).StdOut);
+        var script = harness.WriteScript("ritual run inner --continue-on-error\necho outer:$?\n");
+        var result = await harness.RunScriptAsync(script, continueOnError: true);
+        Assert.Contains("inner:1", result.StdOut);
+        Assert.Contains("outer:1", result.StdOut);
+    }
+
+    [Fact]
+    public async Task UserStatusTracksExternalExitCode()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        using var harness = ScriptTestHarness.Create();
+        Assert.Equal(7, (await harness.RunUserAsync("cmd.exe /c exit 7")).ExitCode);
+        Assert.Equal("7", (await harness.RunUserAsync("echo $?")).StdOut.Trim());
+    }
+
     [Theory]
     [InlineData("ritual run greet Kyle Debug")]
     [InlineData("ritual run greet --continue-on-error Kyle Debug")]
@@ -150,19 +203,19 @@ internal sealed class ScriptTestHarness : IDisposable
     private readonly ShellSessionState _sessionState = new();
     private readonly CommandRegistry _registry = new();
     private readonly ShellHost _host;
+    private readonly ShellSettings _settings = new();
 
     private ScriptTestHarness()
     {
         StateDirectory = Path.Combine(_tempDirectory.Directory.FullName, ".rsh");
         Directory.CreateDirectory(Path.Combine(StateDirectory, "rituals"));
 
-        var settings = new ShellSettings();
         _host = new ShellHost(
             new CommandParser(),
             _registry,
             new ShellLifetime(),
             new ProcessRunner(_sessionState),
-            settings,
+            _settings,
             StateDirectory,
             _sessionState);
 
@@ -180,6 +233,16 @@ internal sealed class ScriptTestHarness : IDisposable
     public static ScriptTestHarness Create()
     {
         return new ScriptTestHarness();
+    }
+
+    public void AddAfterCommandHook(string ritual) => _settings.Hooks[ShellHookEventNames.AfterCommand] = [ritual];
+
+    public async Task<(int ExitCode, string StdOut, string StdErr)> RunUserAsync(string commandText)
+    {
+        var context = CreateContext();
+        var exitCode = await _host.RunCommandAsync(context, commandText,
+            new ShellRunOptions(WriteBanner: false, TriggerCommandHooks: true, AllowCurse: false, AllowAmbient: false), CancellationToken.None);
+        return (exitCode, ((StringWriter)context.Out).ToString(), ((StringWriter)context.Error).ToString());
     }
 
     public string WriteScript(string contents, string? fileName = null)

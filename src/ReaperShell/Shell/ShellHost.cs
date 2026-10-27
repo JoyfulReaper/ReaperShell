@@ -97,11 +97,10 @@ public sealed class ShellHost
                     break;
                 }
 
-                await ExecuteCommandAsync(
+                await ExecuteUserCommandAsync(
                     context,
                     input,
                     new CommandExecutionOptions(EchoCommand: false, TriggerCommandHooks: true, AllowCurse: true, AllowAmbient: true),
-                    null,
                     cancellationToken);
                 SignalInteractivePromptReady();
             }
@@ -178,7 +177,7 @@ public sealed class ShellHost
             ShellBanner.Write(context);
         }
 
-        return await ExecuteCommandAsync(
+        return await ExecuteUserCommandAsync(
             context,
             commandText,
             new CommandExecutionOptions(
@@ -186,7 +185,6 @@ public sealed class ShellHost
                 TriggerCommandHooks: runOptions.TriggerCommandHooks,
                 AllowCurse: runOptions.AllowCurse,
                 AllowAmbient: runOptions.AllowAmbient),
-            null,
             cancellationToken);
     }
 
@@ -350,6 +348,36 @@ public sealed class ShellHost
         }
     }
 
+    private async Task<int> ExecuteUserCommandAsync(
+        ShellContext context,
+        string input,
+        CommandExecutionOptions options,
+        CancellationToken cancellationToken)
+    {
+        if (_commandExecutionDepth.Value != 0)
+        {
+            return await ExecuteCommandAsync(context, input, options, null, cancellationToken);
+        }
+
+        await _commandExecutionLock.WaitAsync(cancellationToken);
+        _commandExecutionDepth.Value++;
+        try
+        {
+            var exitCode = await ExecuteCommandAsync(context, input, options with { ExpandInteractiveStatus = true }, null, cancellationToken);
+            if (!string.IsNullOrWhiteSpace(input))
+            {
+                _sessionState.LastExitCode = exitCode;
+            }
+
+            return exitCode;
+        }
+        finally
+        {
+            _commandExecutionDepth.Value--;
+            _commandExecutionLock.Release();
+        }
+    }
+
     private async Task<int> ExecuteCommandAsync(
         ShellContext context,
         string input,
@@ -387,6 +415,14 @@ public sealed class ShellHost
             if (scriptScope is not null)
             {
                 commandLine = ExpandCommandLine(commandLine, scriptScope);
+            }
+            else if (options.ExpandInteractiveStatus)
+            {
+                var status = _sessionState.LastExitCode.ToString(CultureInfo.InvariantCulture);
+                commandLine = new CommandLine(commandLine.Pipelines.Select(pipeline => new CommandPipeline(
+                    pipeline.Segments.Select(segment => new CommandSegment(
+                        segment.Tokens.Select(token => token is "$?" or "${?}" ? status : token).ToArray(),
+                        segment.Redirections)).ToArray(), pipeline.NextOperator)).ToArray());
             }
 
             if (commandLine.IsSimpleCommand)
@@ -1063,7 +1099,7 @@ public sealed class ShellHost
     }
 }
 
-public sealed record CommandExecutionOptions(bool EchoCommand, bool TriggerCommandHooks, bool RecordHistory = true, bool AllowCurse = false, bool AllowAmbient = false);
+public sealed record CommandExecutionOptions(bool EchoCommand, bool TriggerCommandHooks, bool RecordHistory = true, bool AllowCurse = false, bool AllowAmbient = false, bool ExpandInteractiveStatus = false);
 
 public sealed record ShellRunOptions(
     bool WriteBanner = true,

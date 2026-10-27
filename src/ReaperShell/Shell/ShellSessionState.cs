@@ -9,6 +9,8 @@ public sealed class ShellSessionState
     private readonly Dictionary<string, string> _environmentVariables = new(StringComparer.OrdinalIgnoreCase);
     private readonly string? _historyFilePath;
 
+    public int LastExitCode { get; set; }
+
     public ShellSessionState()
     {
     }

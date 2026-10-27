@@ -92,6 +92,10 @@ rsh> echo hello
 rsh> repo list
 ```
 
+Use `echo $?` (or `echo ${?}`) to print the previous user command's exit code;
+it starts at `0`. The status is expanded when it is a standalone argument,
+including a quoted argument. Scripts also support status expansion within text.
+
 To try a sample command pack:
 
 ```text
