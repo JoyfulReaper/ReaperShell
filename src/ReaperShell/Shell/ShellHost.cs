@@ -1,5 +1,7 @@
-using System.Threading.Channels;
 using ReaperShell.Abstractions;
+using System.Globalization;
+using System.Text;
+using System.Threading.Channels;
 
 namespace ReaperShell.Shell;
 
@@ -18,6 +20,9 @@ public sealed class ShellHost
     private readonly ProcessRunner _processRunner;
     private readonly string _stateDirectory;
     private readonly SemaphoreSlim _interactivePromptReady = new(0, 1);
+    private readonly ShellCommandLineParser _commandLineParser = new();
+    private readonly CommandLineExecutor _commandLineExecutor = new();
+    private readonly ShellCurseState _curseState;
     private readonly ShellSessionState _sessionState;
     private readonly ShellSettings _settings;
     private string? _currentProfilePath;
@@ -29,7 +34,8 @@ public sealed class ShellHost
         ProcessRunner processRunner,
         ShellSettings settings,
         string stateDirectory,
-        ShellSessionState? sessionState = null)
+        ShellSessionState? sessionState = null,
+        ShellCurseState? curseState = null)
     {
         _commandParser = commandParser;
         _commandRegistry = commandRegistry;
@@ -38,6 +44,7 @@ public sealed class ShellHost
         _settings = settings;
         _stateDirectory = stateDirectory;
         _sessionState = sessionState ?? new ShellSessionState();
+        _curseState = curseState ?? new ShellCurseState();
     }
 
     public bool IsInteractiveModeEnabled { get; private set; }
@@ -77,7 +84,8 @@ public sealed class ShellHost
                     var exitCode = await ExecuteCommandAsync(
                         queuedCommand.Context,
                         queuedCommand.CommandText,
-                        new CommandExecutionOptions(EchoCommand: queuedCommand.EchoCommand, TriggerCommandHooks: false),
+                        new CommandExecutionOptions(EchoCommand: queuedCommand.EchoCommand, TriggerCommandHooks: false, AllowCurse: false, AllowAmbient: false),
+                        null,
                         queuedCommand.CancellationToken);
                     queuedCommand.Completion.TrySetResult(exitCode);
                     continue;
@@ -89,10 +97,10 @@ public sealed class ShellHost
                     break;
                 }
 
-                await ExecuteCommandAsync(
+                await ExecuteUserCommandAsync(
                     context,
                     input,
-                    new CommandExecutionOptions(EchoCommand: false, TriggerCommandHooks: true),
+                    new CommandExecutionOptions(EchoCommand: false, TriggerCommandHooks: true, AllowCurse: true, AllowAmbient: true),
                     cancellationToken);
                 SignalInteractivePromptReady();
             }
@@ -112,12 +120,37 @@ public sealed class ShellHost
         bool continueOnError,
         CancellationToken cancellationToken)
     {
-        ShellBanner.Write(context);
+        return await RunScriptAsync(
+            context,
+            scriptPath,
+            continueOnError,
+            ShellRunOptions.Default,
+            cancellationToken);
+    }
+
+    public async Task<int> RunScriptAsync(
+        ShellContext context,
+        string scriptPath,
+        bool continueOnError,
+        ShellRunOptions runOptions,
+        CancellationToken cancellationToken)
+    {
+        if (runOptions.WriteBanner)
+        {
+            ShellBanner.Write(context);
+        }
+
         return await ExecuteScriptFileAsync(
             context,
             scriptPath,
             continueOnError,
-            new CommandExecutionOptions(EchoCommand: true, TriggerCommandHooks: true, RecordHistory: false),
+            new CommandExecutionOptions(EchoCommand: true, TriggerCommandHooks: true, RecordHistory: false, AllowCurse: false, AllowAmbient: false),
+            new ScriptExecutionScope
+            {
+                ScriptPath = scriptPath,
+                Arguments = [],
+                LastExitCode = 0
+            },
             cancellationToken);
     }
 
@@ -126,11 +159,32 @@ public sealed class ShellHost
         string commandText,
         CancellationToken cancellationToken)
     {
-        ShellBanner.Write(context);
-        return await ExecuteCommandAsync(
+        return await RunCommandAsync(
             context,
             commandText,
-            new CommandExecutionOptions(EchoCommand: false, TriggerCommandHooks: true),
+            ShellRunOptions.Default,
+            cancellationToken);
+    }
+
+    public async Task<int> RunCommandAsync(
+        ShellContext context,
+        string commandText,
+        ShellRunOptions runOptions,
+        CancellationToken cancellationToken)
+    {
+        if (runOptions.WriteBanner)
+        {
+            ShellBanner.Write(context);
+        }
+
+        return await ExecuteUserCommandAsync(
+            context,
+            commandText,
+            new CommandExecutionOptions(
+                EchoCommand: false,
+                TriggerCommandHooks: runOptions.TriggerCommandHooks,
+                AllowCurse: runOptions.AllowCurse,
+                AllowAmbient: runOptions.AllowAmbient),
             cancellationToken);
     }
 
@@ -151,7 +205,13 @@ public sealed class ShellHost
             context,
             profilePath,
             continueOnError: true,
-            new CommandExecutionOptions(EchoCommand: true, TriggerCommandHooks: false, RecordHistory: false),
+            new CommandExecutionOptions(EchoCommand: true, TriggerCommandHooks: false, RecordHistory: false, AllowCurse: false, AllowAmbient: false),
+            new ScriptExecutionScope
+            {
+                ScriptPath = profilePath,
+                Arguments = [],
+                LastExitCode = 0
+            },
             cancellationToken);
     }
 
@@ -159,14 +219,35 @@ public sealed class ShellHost
         ShellContext context,
         string ritualPath,
         bool continueOnError,
+        IReadOnlyList<string> ritualArgs,
         CancellationToken cancellationToken)
     {
-        return await ExecuteScriptFileAsync(
+        var ritualName = Path.GetFileNameWithoutExtension(ritualPath);
+        var shouldObserveRitual = _curseState.Enabled && !string.IsNullOrWhiteSpace(ritualName) && File.Exists(ritualPath);
+        if (shouldObserveRitual)
+        {
+            _curseState.ObserveRitualStarted(ritualName);
+        }
+
+        var exitCode = await ExecuteScriptFileAsync(
             context,
             ritualPath,
             continueOnError,
-            new CommandExecutionOptions(EchoCommand: true, TriggerCommandHooks: false, RecordHistory: false),
+            new CommandExecutionOptions(EchoCommand: true, TriggerCommandHooks: false, RecordHistory: false, AllowCurse: false, AllowAmbient: false),
+            new ScriptExecutionScope
+            {
+                ScriptPath = ritualPath,
+                Arguments = ritualArgs.ToArray(),
+                LastExitCode = 0
+            },
             cancellationToken);
+
+        if (shouldObserveRitual)
+        {
+            _curseState.ObserveRitualCompleted(ritualName, exitCode);
+        }
+
+        return exitCode;
     }
 
     public async Task<int> RunAutomationCommandAsync(
@@ -178,7 +259,8 @@ public sealed class ShellHost
         return await ExecuteCommandAsync(
             context,
             commandText,
-            new CommandExecutionOptions(EchoCommand: echoCommand, TriggerCommandHooks: false, RecordHistory: false),
+            new CommandExecutionOptions(EchoCommand: echoCommand, TriggerCommandHooks: false, RecordHistory: false, AllowCurse: false, AllowAmbient: false),
+            null,
             cancellationToken);
     }
 
@@ -241,7 +323,13 @@ public sealed class ShellHost
                     context,
                     ritualPath,
                     continueOnError: true,
-                    new CommandExecutionOptions(EchoCommand: false, TriggerCommandHooks: false, RecordHistory: false),
+                    new CommandExecutionOptions(EchoCommand: false, TriggerCommandHooks: false, RecordHistory: false, AllowCurse: false, AllowAmbient: false),
+                    new ScriptExecutionScope
+                    {
+                        ScriptPath = ritualPath,
+                        Arguments = [],
+                        LastExitCode = 0
+                    },
                     cancellationToken);
 
                 if (exitCode != 0)
@@ -260,10 +348,41 @@ public sealed class ShellHost
         }
     }
 
+    private async Task<int> ExecuteUserCommandAsync(
+        ShellContext context,
+        string input,
+        CommandExecutionOptions options,
+        CancellationToken cancellationToken)
+    {
+        if (_commandExecutionDepth.Value != 0)
+        {
+            return await ExecuteCommandAsync(context, input, options, null, cancellationToken);
+        }
+
+        await _commandExecutionLock.WaitAsync(cancellationToken);
+        _commandExecutionDepth.Value++;
+        try
+        {
+            var exitCode = await ExecuteCommandAsync(context, input, options with { ExpandInteractiveStatus = true }, null, cancellationToken);
+            if (!string.IsNullOrWhiteSpace(input))
+            {
+                _sessionState.LastExitCode = exitCode;
+            }
+
+            return exitCode;
+        }
+        finally
+        {
+            _commandExecutionDepth.Value--;
+            _commandExecutionLock.Release();
+        }
+    }
+
     private async Task<int> ExecuteCommandAsync(
         ShellContext context,
         string input,
         CommandExecutionOptions options,
+        ScriptExecutionScope? scriptScope,
         CancellationToken cancellationToken)
     {
         var ownsExecutionLock = false;
@@ -282,20 +401,74 @@ public sealed class ShellHost
                 context.WriteLine($"{FormatPrompt(context)}{input}");
             }
 
-            var tokens = _commandParser.Parse(input);
-            if (tokens.Count == 0)
+            if (!_commandLineParser.TryParse(input, out var commandLine, out var parseError))
+            {
+                context.WriteErrorLine(parseError);
+                return 1;
+            }
+
+            if (commandLine is null || commandLine.Pipelines.Count == 0)
             {
                 return 0;
             }
 
-            if (!TryResolveCommandTokens(tokens, options.EchoCommand, context, out var resolvedTokens))
+            if (scriptScope is not null)
+            {
+                commandLine = ExpandCommandLine(commandLine, scriptScope);
+            }
+            else if (options.ExpandInteractiveStatus)
+            {
+                var status = _sessionState.LastExitCode.ToString(CultureInfo.InvariantCulture);
+                commandLine = new CommandLine(commandLine.Pipelines.Select(pipeline => new CommandPipeline(
+                    pipeline.Segments.Select(segment => new CommandSegment(
+                        segment.Tokens.Select(token => token is "$?" or "${?}" ? status : token).ToArray(),
+                        segment.Redirections)).ToArray(), pipeline.NextOperator)).ToArray());
+            }
+
+            if (commandLine.IsSimpleCommand)
+            {
+                if (options.RecordHistory && !IsHistoryCommand(commandLine.Pipelines[0].Segments[0].Tokens))
+                {
+                    _sessionState.RecordHistory(input);
+                }
+
+                return await ExecuteResolvedTokensAsync(
+                    context,
+                    commandLine.Pipelines[0].Segments[0].Tokens,
+                    options,
+                    cancellationToken);
+            }
+
+            var firstSegment = commandLine.Pipelines[0].Segments[0];
+            if (firstSegment.Tokens.Count == 0)
+            {
+                context.WriteErrorLine("Pipeline segment cannot be empty.");
+                return 1;
+            }
+
+            if (options.RecordHistory && !IsHistoryCommand(firstSegment.Tokens))
+            {
+                _sessionState.RecordHistory(input);
+            }
+
+            if (!TryResolveCommandTokens(firstSegment.Tokens, false, context, out var resolvedFirstTokens))
             {
                 return 1;
             }
 
-            if (options.RecordHistory && !IsHistoryCommand(resolvedTokens))
+            if (options.AllowCurse)
             {
-                _sessionState.RecordHistory(input);
+                var curseDecision = _curseState.EvaluateBeforeCommand(resolvedFirstTokens[0], options.AllowCurse);
+                if (curseDecision.Message is not null)
+                {
+                    if (curseDecision.BlockCommand)
+                    {
+                        context.WriteErrorLine(curseDecision.Message);
+                        return 1;
+                    }
+
+                    context.WriteLine(curseDecision.Message);
+                }
             }
 
             if (options.TriggerCommandHooks)
@@ -303,35 +476,42 @@ public sealed class ShellHost
                 await RunHookEventAsync(context, ShellHookEventNames.BeforeCommand, cancellationToken);
             }
 
-            var exitCode = 1;
+            var innerOptions = new CommandExecutionOptions(
+                EchoCommand: false,
+                TriggerCommandHooks: false,
+                RecordHistory: false,
+                AllowCurse: false,
+                AllowAmbient: false);
+
+            int exitCode;
             try
             {
-                if (!_commandRegistry.TryGet(resolvedTokens[0], out var command))
-                {
-                    exitCode = await TryRunExternalCommandAsync(
-                        context,
-                        resolvedTokens,
-                        cancellationToken);
-                    return exitCode;
-                }
-
-                exitCode = await command.ExecuteAsync(context, resolvedTokens.Skip(1).ToArray(), cancellationToken);
-                return exitCode;
+                exitCode = await _commandLineExecutor.ExecuteAsync(
+                    context,
+                    commandLine,
+                    ExecuteSegmentAsync,
+                    innerOptions,
+                    cancellationToken);
             }
             catch (OperationCanceledException)
             {
-                context.WriteErrorLine("Command canceled.");
+                context.WriteErrorLine("Pipeline canceled.");
+                return 1;
             }
             catch (Exception ex)
             {
-                context.WriteErrorLine($"Command failed: {ex.Message}");
+                context.WriteErrorLine($"Failed to open redirection target: {ex.Message}");
+                return 1;
             }
-            finally
+
+            if (options.TriggerCommandHooks)
             {
-                if (options.TriggerCommandHooks)
-                {
-                    await RunHookEventAsync(context, ShellHookEventNames.AfterCommand, cancellationToken);
-                }
+                await RunHookEventAsync(context, ShellHookEventNames.AfterCommand, cancellationToken);
+            }
+
+            if (options.AllowAmbient)
+            {
+                MaybeEmitAmbientMessage(context, resolvedFirstTokens[0], exitCode, options);
             }
 
             return exitCode;
@@ -346,11 +526,89 @@ public sealed class ShellHost
         }
     }
 
+    private async Task<int> ExecuteSegmentAsync(
+        ShellContext context,
+        IReadOnlyList<string> tokens,
+        CommandExecutionOptions options,
+        CancellationToken cancellationToken)
+    {
+        return await ExecuteResolvedTokensAsync(context, tokens, options, cancellationToken);
+    }
+
+    private async Task<int> ExecuteResolvedTokensAsync(
+        ShellContext context,
+        IReadOnlyList<string> tokens,
+        CommandExecutionOptions options,
+        CancellationToken cancellationToken)
+    {
+        if (tokens.Count == 0)
+        {
+            return 0;
+        }
+
+        if (!TryResolveCommandTokens(tokens, options.EchoCommand, context, out var resolvedTokens))
+        {
+            return 1;
+        }
+
+        var curseDecision = _curseState.EvaluateBeforeCommand(resolvedTokens[0], options.AllowCurse);
+        if (curseDecision.Message is not null)
+        {
+            if (curseDecision.BlockCommand)
+            {
+                context.WriteErrorLine(curseDecision.Message);
+                return 1;
+            }
+
+            context.WriteLine(curseDecision.Message);
+        }
+
+        if (options.TriggerCommandHooks)
+        {
+            await RunHookEventAsync(context, ShellHookEventNames.BeforeCommand, cancellationToken);
+        }
+
+        var exitCode = 1;
+        try
+        {
+            if (!_commandRegistry.TryGet(resolvedTokens[0], out var command))
+            {
+                exitCode = await TryRunExternalCommandAsync(
+                    context,
+                    resolvedTokens,
+                    cancellationToken);
+            }
+            else
+            {
+                exitCode = await command.ExecuteAsync(context, resolvedTokens.Skip(1).ToArray(), cancellationToken);
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            context.WriteErrorLine("Command canceled.");
+        }
+        catch (Exception ex)
+        {
+            context.WriteErrorLine($"Command failed: {ex.Message}");
+        }
+        finally
+        {
+            if (options.TriggerCommandHooks)
+            {
+                await RunHookEventAsync(context, ShellHookEventNames.AfterCommand, cancellationToken);
+            }
+        }
+
+        MaybeEmitAmbientMessage(context, resolvedTokens[0], exitCode, options);
+        return exitCode;
+    }
+
     private async Task<int> ExecuteScriptFileAsync(
         ShellContext context,
         string scriptPath,
         bool continueOnError,
         CommandExecutionOptions options,
+        ScriptExecutionScope scriptScope,
         CancellationToken cancellationToken)
     {
         if (!File.Exists(scriptPath))
@@ -360,6 +618,7 @@ public sealed class ShellHost
         }
 
         var exitCode = 0;
+        scriptScope.LastExitCode = 0;
         foreach (var line in await File.ReadAllLinesAsync(scriptPath, cancellationToken))
         {
             var commandText = line.Trim();
@@ -372,8 +631,10 @@ public sealed class ShellHost
                 context,
                 commandText,
                 options,
+                scriptScope,
                 cancellationToken);
 
+            scriptScope.LastExitCode = commandExitCode;
             if (commandExitCode != 0)
             {
                 exitCode = commandExitCode;
@@ -390,6 +651,187 @@ public sealed class ShellHost
         }
 
         return exitCode;
+    }
+
+    private CommandLine ExpandCommandLine(CommandLine commandLine, ScriptExecutionScope scriptScope)
+    {
+        var pipelines = commandLine.Pipelines
+            .Select(pipeline => new CommandPipeline(
+                pipeline.Segments
+                    .Select(segment => new CommandSegment(
+                        segment.Tokens.Select(token => ExpandScriptValue(token, scriptScope)).ToArray(),
+                        segment.Redirections
+                            .Select(redirection => new CommandRedirection(
+                                redirection.Kind,
+                                ExpandScriptValue(redirection.TargetPath, scriptScope)))
+                            .ToArray()))
+                    .ToArray(),
+                pipeline.NextOperator))
+            .ToArray();
+
+        return new CommandLine(pipelines);
+    }
+
+    private string ExpandScriptValue(string value, ScriptExecutionScope scriptScope)
+    {
+        if (string.IsNullOrEmpty(value) || value.IndexOf('$') < 0)
+        {
+            return value;
+        }
+
+        var builder = new StringBuilder(value.Length);
+        for (var index = 0; index < value.Length; index++)
+        {
+            var character = value[index];
+            if (character != '$' || index + 1 >= value.Length)
+            {
+                builder.Append(character);
+                continue;
+            }
+
+            var next = value[index + 1];
+            switch (next)
+            {
+                case '$':
+                    builder.Append('$');
+                    index++;
+                    continue;
+
+                case '?':
+                    builder.Append(scriptScope.LastExitCode.ToString(CultureInfo.InvariantCulture));
+                    index++;
+                    continue;
+
+                case '*':
+                    builder.Append(string.Join(" ", scriptScope.Arguments));
+                    index++;
+                    continue;
+
+                case '{':
+                    if (TryReadBracedVariable(value, index + 2, out var variableName, out var closingBrace))
+                    {
+                        builder.Append(ResolveScriptVariable(variableName, scriptScope));
+                        index = closingBrace;
+                        continue;
+                    }
+
+                    builder.Append('$');
+                    continue;
+            }
+
+            if (char.IsDigit(next))
+            {
+                var digitCount = index + 2 < value.Length && char.IsDigit(value[index + 2]) ? 2 : 1;
+                var positionalIndex = value.Substring(index + 1, digitCount);
+                builder.Append(ResolvePositionalVariable(positionalIndex, scriptScope));
+                index += digitCount;
+                continue;
+            }
+
+            if (IsVariableNameStart(next))
+            {
+                var variableEnd = index + 2;
+                while (variableEnd < value.Length && IsVariableNamePart(value[variableEnd]))
+                {
+                    variableEnd++;
+                }
+
+                var variableName = value.Substring(index + 1, variableEnd - (index + 1));
+                builder.Append(ResolveScriptVariable(variableName, scriptScope));
+                index = variableEnd - 1;
+                continue;
+            }
+
+            builder.Append('$');
+        }
+
+        return builder.ToString();
+    }
+
+    private static bool TryReadBracedVariable(
+        string value,
+        int startIndex,
+        out string variableName,
+        out int closingBraceIndex)
+    {
+        variableName = string.Empty;
+        closingBraceIndex = -1;
+
+        var closingBrace = value.IndexOf('}', startIndex);
+        if (closingBrace < 0)
+        {
+            return false;
+        }
+
+        variableName = value.Substring(startIndex, closingBrace - startIndex);
+        closingBraceIndex = closingBrace;
+        return true;
+    }
+
+    private string ResolveScriptVariable(string variableName, ScriptExecutionScope scriptScope)
+    {
+        if (variableName.Length == 0)
+        {
+            return string.Empty;
+        }
+
+        if (variableName == "0")
+        {
+            return scriptScope.ScriptPath;
+        }
+
+        if (variableName == "*")
+        {
+            return string.Join(" ", scriptScope.Arguments);
+        }
+
+        if (variableName == "?")
+        {
+            return scriptScope.LastExitCode.ToString(CultureInfo.InvariantCulture);
+        }
+
+        if (int.TryParse(variableName, NumberStyles.None, CultureInfo.InvariantCulture, out _))
+        {
+            return ResolvePositionalVariable(variableName, scriptScope);
+        }
+
+        if (_sessionState.TryGetEnvironmentVariable(variableName, out var sessionValue))
+        {
+            return sessionValue;
+        }
+
+        return Environment.GetEnvironmentVariable(variableName) ?? string.Empty;
+    }
+
+    private static string ResolvePositionalVariable(string positionalText, ScriptExecutionScope scriptScope)
+    {
+        if (!int.TryParse(positionalText, NumberStyles.None, CultureInfo.InvariantCulture, out var positionalIndex))
+        {
+            return string.Empty;
+        }
+
+        if (positionalIndex == 0)
+        {
+            return scriptScope.ScriptPath;
+        }
+
+        var argumentIndex = positionalIndex - 1;
+        if (argumentIndex < 0 || argumentIndex >= scriptScope.Arguments.Count)
+        {
+            return string.Empty;
+        }
+
+        return scriptScope.Arguments[argumentIndex];
+    }
+
+    private static bool IsVariableNameStart(char character)
+    {
+        return char.IsLetter(character) || character == '_';
+    }
+
+    private static bool IsVariableNamePart(char character)
+    {
+        return char.IsLetterOrDigit(character) || character == '_';
     }
 
     private bool TryResolveCommandTokens(
@@ -455,12 +897,14 @@ public sealed class ShellHost
 
                 try
                 {
+                    var standardInput = await context.Input.ReadToEndAsync(cancellationToken);
                     return (await _processRunner.RunAsync(
                         executablePath,
                         resolvedTokens.Skip(1).ToArray(),
                         context.WorkingDirectory.FullName,
                         context.WriteLine,
                         context.WriteErrorLine,
+                        standardInput: standardInput,
                         cancellationToken: cancellationToken)).ExitCode;
                 }
                 catch (OperationCanceledException)
@@ -484,6 +928,27 @@ public sealed class ShellHost
     {
         context.WriteErrorLine($"Unknown command: {commandName}");
         context.WriteErrorLine(hint);
+    }
+
+    private void MaybeEmitAmbientMessage(
+        ShellContext context,
+        string commandName,
+        int exitCode,
+        CommandExecutionOptions options)
+    {
+        if (!options.AllowAmbient)
+        {
+            return;
+        }
+
+        var ambientMessage = _curseState.TryGetAmbientMessage(commandName, exitCode);
+        if (ambientMessage is null)
+        {
+            return;
+        }
+
+        _curseState.AddAmbientEvent(ambientMessage);
+        context.WriteLine(ambientMessage);
     }
 
     public async Task<int> ReloadAsync(ShellContext context, CancellationToken cancellationToken)
@@ -520,6 +985,15 @@ public sealed class ShellHost
     {
         return resolvedTokens.Count > 0 &&
             string.Equals(resolvedTokens[0], "history", StringComparison.OrdinalIgnoreCase);
+    }
+
+    internal sealed class ScriptExecutionScope
+    {
+        public required string ScriptPath { get; init; }
+
+        public required IReadOnlyList<string> Arguments { get; init; }
+
+        public int LastExitCode { get; set; }
     }
 
     private async Task ReadInteractiveInputAsync(
@@ -564,12 +1038,16 @@ public sealed class ShellHost
 
     internal string FormatPrompt(ShellContext context)
     {
-        if (!_settings.ShowPathInPrompt)
+        var prompt = _settings.ShowPathInPrompt
+            ? FormatPrompt(context.WorkingDirectory.FullName)
+            : "rsh> ";
+
+        if (_curseState.Enabled)
         {
-            return "rsh> ";
+            return "[cursed] " + prompt;
         }
 
-        return FormatPrompt(context.WorkingDirectory.FullName);
+        return prompt;
     }
 
     internal static string FormatPrompt(string workingDirectory)
@@ -621,7 +1099,22 @@ public sealed class ShellHost
     }
 }
 
-public sealed record CommandExecutionOptions(bool EchoCommand, bool TriggerCommandHooks, bool RecordHistory = true);
+public sealed record CommandExecutionOptions(bool EchoCommand, bool TriggerCommandHooks, bool RecordHistory = true, bool AllowCurse = false, bool AllowAmbient = false, bool ExpandInteractiveStatus = false);
+
+public sealed record ShellRunOptions(
+    bool WriteBanner = true,
+    bool TriggerCommandHooks = true,
+    bool AllowCurse = true,
+    bool AllowAmbient = true)
+{
+    public static ShellRunOptions Default { get; } = new();
+
+    public static ShellRunOptions Quiet { get; } = new(
+        WriteBanner: false,
+        TriggerCommandHooks: false,
+        AllowCurse: false,
+        AllowAmbient: false);
+}
 
 internal sealed record QueuedInteractiveCommand(
     ShellContext Context,

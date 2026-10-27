@@ -48,6 +48,7 @@ public sealed class ProcessRunner
         Action<string>? onStandardOutput = null,
         Action<string>? onStandardError = null,
         IReadOnlyDictionary<string, string?>? environmentVariables = null,
+        string? standardInput = null,
         CancellationToken cancellationToken = default)
     {
         var startInfo = new ProcessStartInfo
@@ -57,6 +58,7 @@ public sealed class ProcessRunner
             UseShellExecute = false,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
+            RedirectStandardInput = standardInput is not null,
             CreateNoWindow = true
         };
 
@@ -101,6 +103,7 @@ public sealed class ProcessRunner
             onStandardError?.Invoke(eventArgs.Data);
         };
 
+        cancellationToken.ThrowIfCancellationRequested();
         if (!process.Start())
         {
             throw new InvalidOperationException($"Failed to start process '{executable}'.");
@@ -111,9 +114,23 @@ public sealed class ProcessRunner
 
         try
         {
+            if (standardInput is not null)
+            {
+                try
+                {
+                    await process.StandardInput.WriteAsync(standardInput.AsMemory(), cancellationToken);
+                    await process.StandardInput.FlushAsync(cancellationToken);
+                    process.StandardInput.Close();
+                }
+                catch (IOException)
+                {
+                    // Consumers may exit before reading all input; preserve their actual exit code.
+                }
+            }
+
             await process.WaitForExitAsync(cancellationToken);
         }
-        catch (OperationCanceledException)
+        catch
         {
             if (!process.HasExited)
             {

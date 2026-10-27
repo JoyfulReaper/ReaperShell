@@ -73,22 +73,23 @@ public sealed class RitualCommand : IShellCommand
         IReadOnlyList<string> args,
         CancellationToken cancellationToken)
     {
-        if (args.Count is not 2 and not 3)
+        if (args.Count < 2)
         {
-            context.WriteErrorLine("Usage: ritual run <name> [--continue-on-error]");
+            context.WriteErrorLine("Usage: ritual run <name> [--continue-on-error] [args...]");
             return 1;
         }
 
         var continueOnError = false;
-        if (args.Count == 3)
+        var ritualArgs = new List<string>();
+        for (var index = 2; index < args.Count; index++)
         {
-            if (!string.Equals(args[2], "--continue-on-error", StringComparison.OrdinalIgnoreCase))
+            if (string.Equals(args[index], "--continue-on-error", StringComparison.OrdinalIgnoreCase))
             {
-                context.WriteErrorLine("Usage: ritual run <name> [--continue-on-error]");
-                return 1;
+                continueOnError = true;
+                continue;
             }
 
-            continueOnError = true;
+            ritualArgs.Add(args[index]);
         }
 
         if (!TryGetRitualPath(args[1], context, out var ritualPath))
@@ -96,7 +97,7 @@ public sealed class RitualCommand : IShellCommand
             return 1;
         }
 
-        return await _shellHost.RunRitualAsync(context, ritualPath, continueOnError, cancellationToken);
+        return await _shellHost.RunRitualAsync(context, ritualPath, continueOnError, ritualArgs, cancellationToken);
     }
 
     private int PrintRitualPath(ShellContext context, IReadOnlyList<string> args)

@@ -92,6 +92,10 @@ rsh> echo hello
 rsh> repo list
 ```
 
+Use `echo $?` (or `echo ${?}`) to print the previous user command's exit code;
+it starts at `0`. The status is expanded when it is a standalone argument,
+including a quoted argument. Scripts also support status expansion within text.
+
 To try a sample command pack:
 
 ```text
@@ -101,6 +105,41 @@ rsh> repo build sample
 rsh> repo load sample
 rsh> hello
 ```
+
+## Basic Pipes
+
+Use `|` to pass a command's stdout to the next command's input:
+
+```text
+echo hello | grep hell
+cat app.log | grep error | head -n 1
+echo "a|b"|cat
+```
+
+Pipes work between built-ins, plugins that read `ShellContext.Input`, and external
+commands when PATH fallback is enabled. Single- and double-quoted `|` characters
+are literal text; spaces around an unquoted `|` are optional. Stderr stays separate
+and is never implicitly fed to the next stage.
+
+Stages run sequentially. Each stage's stdout is buffered in a `StringWriter`, then
+passed to the next stage as a `StringReader`. The pipeline returns the last stage's
+exit code, even if an earlier stage failed; there is no `pipefail` mode. Cancellation
+stops later stages, cancels external stdin writes, and terminates the active external
+process tree; a canceled pipeline returns exit code 1. In-process commands must
+cooperate with cancellation.
+
+Redirection applies per stage. For example, `echo hello | cat > out.txt` saves the
+final output. ReaperShell's existing `echo hello > copy.txt | cat` behavior writes
+stdout to both the file and the next stage; `>>` does the same while appending.
+`2>` redirects only that stage's stderr.
+
+These are buffered text pipes, not concurrent OS pipes. There is no buffer size
+limit or disk spill, so large output can consume substantial memory, and an endless
+producer prevents later stages from starting. External stdout/stderr are drained
+asynchronously while stdin is written, but output is also retained in memory and
+forwarded line by line, normalizing line endings. Binary data and interactive or
+infinite-stream pipelines are not supported. No platform shell is invoked, and
+`|&`, job control, background execution, and process substitution are unsupported.
 
 ## Built-In Commands
 
@@ -153,7 +192,7 @@ Color output follows `ShellSettings.ColorMode`, and redirected output stays plai
 | `history` | Prints session history, or clears it. | `history` or `history clear` | `history clear` |
 | `env` | Lists and manages session-scoped environment overrides. | `env`, `env get <name>`, `env set <name> <value>`, `env unset <name>` | `env set FOO bar` |
 | `alias` | Lists and manages aliases. | `alias`, `alias set <name> <replacement>`, `alias remove <name>`, `alias clear`, `alias show <name>` | `alias set ll "ls -a"` |
-| `ritual` | Lists, creates, and runs ritual scripts. | `ritual list`, `ritual run <name> [--continue-on-error]`, `ritual path`, `ritual new <name>` | `ritual run awaken` |
+| `ritual` | Lists, creates, and runs ritual scripts. | `ritual list`, `ritual run <name> [--continue-on-error] [args...]`, `ritual path`, `ritual new <name>` | `ritual run awaken` |
 | `hook` | Lists and manages shell event hooks. | `hook list`, `hook add <event> <ritual-name>`, `hook remove <event> <ritual-name>`, `hook clear <event>`, `hook events` | `hook add startup awaken` |
 | `command` | Lists and forges commands inside a command pack. | `command templates`, `command list <repo>`, `command new <repo> <command-name> [--template <basic|file|process>] [--language <csharp|fsharp|vb>]`, `command <remove|delete|rm> <repo> <command-name>` | `command new tools hello-kyle --language csharp` |
 | `which` | Shows where a command comes from. | `which <command>` | `which hello` |
@@ -163,8 +202,9 @@ Color output follows `ShellSettings.ColorMode`, and redirected output stays plai
 | `banner` | Prints the shell banner again. | `banner` | `banner` |
 | `status` | Prints shell runtime status. | `status` | `status` |
 | `doctor` | Runs a focused environment self-check. | `doctor [--verbose]` | `doctor --verbose` |
-| `fortune` | Prints a small shell fortune. | `fortune` | `fortune` |
-| `pray` | Prints a pseudo-ritual shell response. | `pray` | `pray` |
+| `curse` | Enables, disables, inspects, and configures cursed mode. | `curse [status\|inspect\|journal\|poke\|enable\|disable\|exorcise\|quiet\|listen\|chatter <percent>\|set-failure-rate <percent>]` | `curse inspect` |
+| `pray` | Adds blessing charges or reports curse status when cursed mode is active. | `pray [status\|hard]` | `pray hard` |
+| `fortune` | Prints a small shell fortune or omen. | `fortune [read\|status]` | `fortune status` |
 | `reload` | Reloads settings and the active profile. | `reload` | `reload` |
 
 ### Repository And Plugin Management
@@ -173,6 +213,87 @@ Color output follows `ShellSettings.ColorMode`, and redirected output stays plai
 | --- | --- | --- | --- |
 | `repo` | Manages command-pack repositories. | See the repo sections below. | `repo list` |
 | `plugins` | Lists loaded command packs and their commands. | `plugins` | `plugins` |
+
+## Cursed Mode
+
+Cursed mode is an optional toy mode for making the shell feel haunted. It is off by default.
+
+When enabled, ReaperShell may occasionally refuse to run a normal user command before execution. It does not interrupt commands after they start, and it does not make destructive commands partially execute. Protected commands such as `curse`, `pray`, `fortune`, `ritual`, `help`, `exit`, `quit`, `history`, and `doctor` are not blocked.
+
+The cursed prompt uses an ASCII-safe prefix: `[cursed] `.
+
+Useful commands:
+
+- `curse enable` turns cursed mode on
+- `curse disable` turns it off and clears blessing charges
+- `curse exorcise` is a more dramatic disable
+- `curse status` shows the core state
+- `curse inspect` shows a richer status view, including ambient chatter and protected commands
+- `curse journal` prints recent curse events
+- `curse quiet` silences ambient chatter
+- `curse listen` restores the default ambient chatter rate
+- `curse chatter <percent>` sets ambient chatter from `0` to `25`
+- `curse poke` provokes a harmless reaction
+- `curse set-failure-rate <percent>` sets the command failure chance from `0` to `50`
+- `pray` adds blessing charges when cursed
+- `pray status` shows the current curse state
+- `pray hard` adds extra blessing charges
+- `fortune` and `fortune read` print a fortune and may add a small omen effect
+- `fortune status` shows the curse state and the last omen
+- `ritual` is protected from cursed command blocking
+- user-run rituals can add harmless curse journal entries when cursed mode is enabled, but commands inside rituals still run with curse blocking and ambient chatter disabled
+
+Examples:
+
+```text
+rsh> curse enable
+Cursed mode enabled. This is intentionally silly and opt-in.
+Mood: petty. Failure chance: 15%.
+
+rsh> pray
+THE HEAP ACCEPTS YOUR OFFERING.
+Blessing charges increased to 3.
+
+rsh> curse inspect
+Cursed mode: enabled
+Blessing charges: 3
+Failure chance: 15%
+Mood: petty
+Ambient chatter: 5%
+Last omen: Good omen: the daemon grants one blessing charge.
+Ambient flavor: listening
+Protected commands: pray, curse, fortune, help, exit, quit, history, doctor
+
+rsh> fortune
+A clean build is just a failed build that has not happened yet.
+Good omen: the daemon grants one blessing charge.
+
+rsh> curse exorcise
+The curse screams in YAML and leaves. Blessing charges cleared.
+```
+
+### How Command Blocking Works
+
+- Blocking happens before execution starts.
+- Blessing charges are consumed before failure checks.
+- The curse state keeps blocking and ambient flavor in memory for the current session.
+- `curse disable` and `curse exorcise` clear blessing charges and turn cursed mode off.
+- Cursed mode does not affect profile loading, hooks, rituals, or internal automation unless those paths are explicitly user-driven.
+- Scripts are not randomly cursed; the host only applies curse blocking to normal user commands.
+
+Command packs can opt in safely through `ICursedShell` on `ShellContext.Services`:
+
+```csharp
+using ReaperShell.Abstractions;
+
+var curse = context.Services?.GetService(typeof(ICursedShell)) as ICursedShell;
+if (curse?.IsEnabled == true)
+{
+    curse.AddAmbientEvent("The custom command leaves a strange smell in the heap.");
+}
+```
+
+Cursed mode never makes commands partially execute or destructive behavior more dangerous.
 
 ## Command Packs And Plugins
 
@@ -330,8 +451,8 @@ Rituals are named `.rsh` scripts stored under `.rsh/rituals/`.
 - `ritual list` lists available ritual names
 - `ritual path` prints the rituals directory
 - `ritual new <name>` creates a new ritual
-- `ritual run <name>` runs one ritual
-- `ritual run <name> --continue-on-error` keeps going after failures
+- `ritual run <name> [--continue-on-error] [args...]` runs one ritual
+- Rituals can use `$0`, `$1`, `$*`, `$?`, `${name}`, and `$$` for simple variable expansion
 
 ### Hooks
 
@@ -374,6 +495,8 @@ Key files and directories:
 - `.rsh/profile.rsh` is the default startup profile
 - `.rsh/rituals/` stores ritual scripts
 - `.rsh/repos/` stores managed local repos created by `repo new` or some Git URL workflows
+
+Cursed mode state is session-only. Blessing charges, ambient chatter level, mood, the journal, and other curse flavor live in memory for the current process and are not persisted in `.rsh/settings.json`.
 
 What to commit:
 
@@ -419,6 +542,28 @@ What matters:
 - write errors through `ShellContext.WriteErrorLine`
 - return `0` for success and a non-zero exit code for failure
 
+### Optional: Cursed Mode Integration
+
+Cursed mode is optional. A command can work perfectly well without knowing anything about it, and older hosts may not provide `ICursedShell` at all.
+
+If you do opt in, keep the integration harmless:
+
+- read the shared curse state from `ShellContext.Services`
+- treat curse interactions as flavor, journaling, or small one-shot hints
+- avoid permanent failure changes, file-system side effects, or external process behavior
+
+Example:
+
+```csharp
+using ReaperShell.Abstractions;
+
+var curse = context.Services?.GetService(typeof(ICursedShell)) as ICursedShell;
+if (curse?.IsEnabled == true)
+{
+    curse.AddAmbientEvent("The custom command leaves a strange smell in the heap.");
+}
+```
+
 ## Sample Command Packs
 
 The repository includes sample packs under `sample-packs/`:
@@ -449,6 +594,9 @@ rsh> hello
 - `missing ReaperShell.Abstractions`: make sure command projects reference the workspace copy of `ReaperShell.Abstractions`
 - `scripts not running`: check the script path, and remember that `--continue-on-error` only applies to script execution
 - `profile path issues`: verify `.rsh/profile.rsh` exists, or use `--profile <path>` to point at a specific profile
+- `commands sometimes refuse to run`: check whether cursed mode is enabled with `curse status` or `curse inspect`; run `curse disable` or `curse exorcise` to turn it off
+- `ambient messages are too noisy`: use `curse quiet` or lower chatter with `curse chatter <percent>`
+- `command packs do not see cursed mode`: make sure they reference the current `ReaperShell.Abstractions` package and check `ShellContext.Services` for `ICursedShell`
 
 ## Development
 

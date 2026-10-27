@@ -1,7 +1,7 @@
-using System.Reflection;
-using System.Runtime.CompilerServices;
 using ReaperShell.Abstractions;
 using ReaperShell.Shell;
+using System.Reflection;
+using System.Runtime.CompilerServices;
 
 namespace ReaperShell.Plugins;
 
@@ -81,7 +81,7 @@ public sealed class CommandPackManager
                     context.WriteLine,
                     context.WriteErrorLine,
                     dotnetEnvironment,
-                    cancellationToken);
+                    cancellationToken: cancellationToken);
 
                 if (restoreResult.ExitCode != 0)
                 {
@@ -96,7 +96,7 @@ public sealed class CommandPackManager
                     context.WriteLine,
                     context.WriteErrorLine,
                     dotnetEnvironment,
-                    cancellationToken);
+                    cancellationToken: cancellationToken);
 
                 if (result.ExitCode != 0)
                 {
@@ -126,12 +126,7 @@ public sealed class CommandPackManager
 
     private string GetReaperShellAbstractionsProjectPath()
     {
-        return Path.GetFullPath(
-            Path.Combine(
-                _workspaceRoot,
-                "src",
-                "ReaperShell.Abstractions",
-                "ReaperShell.Abstractions.csproj"));
+        return WorkspaceRootResolver.GetReaperShellAbstractionsProjectPath(_workspaceRoot);
     }
 
     private static async Task<string> EnsureNuGetConfigAsync(CancellationToken cancellationToken)
